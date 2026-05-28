@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+.venv/
+data/
+.env
+*.log
+build/
+dist/
+bin/
+obj/
+*.exe
+*.user
+*.suo
+.vs/

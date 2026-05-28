@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#f6f8fb" />
+    <title>云端手机鼠标</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="loginView" class="view auth-view">
+        <form id="loginForm" class="auth-panel">
+          <div class="brand">
+            <span class="brand-mark"></span>
+            <div>
+              <h1>云端手机鼠标</h1>
+              <p>登录后选择在线电脑开始控制</p>
+            </div>
+          </div>
+          <label>
+            <span>账号</span>
+            <input id="username" autocomplete="username" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button" type="submit">登录</button>
+          <button id="registerButton" class="secondary-button" type="button">注册账号</button>
+          <p id="loginError" class="error-text"></p>
+        </form>
+      </section>
+
+      <section id="devicesView" class="view hidden">
+        <header class="topbar">
+          <div>
+            <h2>我的电脑</h2>
+            <p id="userLabel"></p>
+          </div>
+          <button id="logoutButton" class="ghost-button" type="button">退出</button>
+        </header>
+        <div id="deviceList" class="device-list"></div>
+      </section>
+
+      <section id="controlView" class="view control-view hidden">
+        <div id="pad" aria-label="远程鼠标触控板">
+          <div id="cursor" aria-hidden="true"></div>
+          <button id="backButton" class="floating-button" type="button">返回</button>
+          <div id="deviceStatus" class="device-status"></div>
+          <div id="controls" aria-label="控制区">
+            <div class="control-row">
+              <div id="buttonPicker" role="group" aria-label="鼠标按键选择">
+                <button class="control-button button-option active" type="button" data-button="left" aria-label="左键" aria-pressed="true">L</button>
+                <button class="control-button button-option" type="button" data-button="middle" aria-label="中键" aria-pressed="false">M</button>
+                <button class="control-button button-option" type="button" data-button="right" aria-label="右键" aria-pressed="false">R</button>
+              </div>
+              <div id="zoomControls" role="group" aria-label="缩放控制">
+                <button class="control-button zoom-button" type="button" data-zoom="-1" aria-label="缩小">-</button>
+                <button class="control-button zoom-button" type="button" data-zoom="1" aria-label="放大">+</button>
+              </div>
+            </div>
+            <div id="shortcutControls" class="control-row" role="group" aria-label="常用快捷键">
+              <button class="shortcut-button" type="button" data-hotkey="copy" aria-label="复制">复制</button>
+              <button class="shortcut-button" type="button" data-hotkey="paste" aria-label="粘贴">粘贴</button>
+              <button class="shortcut-button" type="button" data-hotkey="undo" aria-label="撤销">撤销</button>
+              <button class="shortcut-button" type="button" data-hotkey="save" aria-label="保存">保存</button>
+              <button class="shortcut-button" type="button" data-key="enter" aria-label="回车">回车</button>
+              <button class="shortcut-button" type="button" data-key="escape" aria-label="Esc">Esc</button>
+            </div>
+          </div>
+          <form id="remoteInputPanel" class="remote-input-panel hidden" autocomplete="off">
+            <input id="remoteInput" type="text" enterkeyhint="send" placeholder="在电脑输入框中输入文字" />
+            <button class="primary-button" type="submit">发送</button>
+          </form>
+        </div>
+      </section>
+    </main>
+    <script src="/config.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

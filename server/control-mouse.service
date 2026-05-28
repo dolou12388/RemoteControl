@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloud Phone Mouse Control
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/control-mouse
+EnvironmentFile=/opt/control-mouse/.env
+ExecStart=/opt/control-mouse/venv/bin/python /opt/control-mouse/cloud_server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
