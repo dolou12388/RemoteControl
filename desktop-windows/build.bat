@@ -11,4 +11,9 @@ if not exist "%CSC%" (
   exit /b 1
 )
 "%CSC%" /nologo /target:winexe /platform:anycpu /out:ControlMouseDesktop.exe /reference:System.dll /reference:System.Drawing.dll /reference:System.Net.Http.dll /reference:System.Web.Extensions.dll /reference:System.Windows.Forms.dll /reference:"%UIA_CLIENT%" /reference:"%UIA_TYPES%" Program.cs
+if errorlevel 1 (
+  echo Build failed.
+  exit /b 1
+)
+echo Build success: ControlMouseDesktop.exe
 endlocal
