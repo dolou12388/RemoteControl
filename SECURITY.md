@@ -6,6 +6,7 @@ RemoteControl is designed for self-hosted personal or small-team use. It relays 
 
 - Use HTTPS/WSS in production.
 - Use a long random password for every account.
+- Keep the built-in login rate limit enabled.
 - Keep `.env` and `server/data/` private.
 - Run the server on a VPS you control.
 - Keep Linux packages and Python dependencies updated.
@@ -31,10 +32,11 @@ Anyone who knows a valid username and password can control desktops logged in wi
 The project does not currently include:
 
 - multi-factor authentication
-- brute-force lockout
 - per-device approval
 - audit logs
 - encrypted local storage for desktop credentials
+
+The server includes basic login rate limiting, session expiry, message validation, device timeout checks, and a `/health` endpoint. These are baseline protections, not a substitute for HTTPS, strong passwords, and careful server access control.
 
 For public or multi-user deployments, consider adding these protections before relying on it for sensitive machines.
 

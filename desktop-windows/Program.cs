@@ -262,6 +262,7 @@ namespace ControlMouseCSharp
         private async Task MonitorInputFocusAsync(ClientWebSocket socket, CancellationToken cancel)
         {
             bool? lastActive = null;
+            var lastHeartbeat = DateTime.UtcNow;
             while (!cancel.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
                 var active = IsTextInputFocused();
@@ -272,6 +273,14 @@ namespace ControlMouseCSharp
                     {
                         {"type", "inputFocus"},
                         {"active", active}
+                    }, cancel);
+                }
+                if ((DateTime.UtcNow - lastHeartbeat).TotalSeconds >= 15)
+                {
+                    lastHeartbeat = DateTime.UtcNow;
+                    await SendJsonAsync(socket, new Dictionary<string, object>
+                    {
+                        {"type", "heartbeat"}
                     }, cancel);
                 }
                 await Task.Delay(350, cancel).ContinueWith(delegate { });

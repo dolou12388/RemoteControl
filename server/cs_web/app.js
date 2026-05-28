@@ -30,10 +30,15 @@ const SCROLL_SENSITIVITY = 1.8;
 const ZOOM_WHEEL_DELTA = 140;
 const ZOOM_REPEAT_MS = 110;
 const BLOCKED_TOUCH_EVENTS = ["touchstart", "touchmove", "gesturestart", "gesturechange"];
+const FETCH_TIMEOUT_MS = 10000;
+const RECONNECT_MIN_DELAY = 1000;
+const RECONNECT_MAX_DELAY = 30000;
 
 let token = localStorage.getItem("csToken") || "";
 let username = localStorage.getItem("csUsername") || "";
 let ws = null;
+let reconnectDelay = RECONNECT_MIN_DELAY;
+let reconnectTimer = null;
 let devices = [];
 let selectedDevice = null;
 let selectedButton = "left";
@@ -101,6 +106,27 @@ function sendCommand(command) {
   ws.send(JSON.stringify({ type: "command", deviceId: selectedDevice.id, command }));
 }
 
+async function fetchWithTimeout(url, options, timeout = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("网络超时，请稍后重试");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function setConnectionState(text, isWeak = false) {
+  if (!selectedDevice || controlView.classList.contains("hidden")) return;
+  deviceStatus.textContent = text;
+  deviceStatus.style.opacity = isWeak ? "0.62" : "1";
+}
+
 function showRemoteInput() {
   if (!selectedDevice) return;
   remoteInputPanel.classList.remove("hidden");
@@ -163,7 +189,12 @@ function renderDevices() {
 
 function connectWs() {
   if (!token) return;
+  clearTimeout(reconnectTimer);
   ws = new WebSocket(wsUrl());
+  ws.addEventListener("open", () => {
+    reconnectDelay = RECONNECT_MIN_DELAY;
+    setConnectionState(selectedDevice ? `${selectedDevice.name} 在线` : "已连接");
+  });
   ws.addEventListener("message", (event) => {
     const data = JSON.parse(event.data);
     if (data.type === "devices") {
@@ -183,28 +214,32 @@ function connectWs() {
     }
   });
   ws.addEventListener("close", () => {
-    setTimeout(connectWs, 1000);
+    setConnectionState("网络已断开，正在重连...", true);
+    reconnectTimer = setTimeout(connectWs, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
   });
 }
 
 async function login(usernameValue, passwordValue) {
-  const response = await fetch(appUrl("/api/login"), {
+  const response = await fetchWithTimeout(appUrl("/api/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: usernameValue, password: passwordValue }),
   });
+  if (response.status === 429) throw new Error("登录尝试过多，请稍后再试");
   if (!response.ok) throw new Error("账号或密码错误");
   return response.json();
 }
 
 async function registerAccount(usernameValue, passwordValue) {
-  const response = await fetch(appUrl("/api/register"), {
+  const response = await fetchWithTimeout(appUrl("/api/register"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: usernameValue, password: passwordValue }),
   });
   if (response.status === 409) throw new Error("账号已存在");
-  if (!response.ok) throw new Error("注册失败，账号至少3位，密码至少6位");
+  if (response.status === 400) throw new Error("注册失败，账号至少3位，密码至少8位，并包含大写字母和数字");
+  if (!response.ok) throw new Error("注册失败，请稍后重试");
   return response.json();
 }
 
@@ -214,6 +249,7 @@ function logout() {
   selectedDevice = null;
   localStorage.removeItem("csToken");
   localStorage.removeItem("csUsername");
+  clearTimeout(reconnectTimer);
   if (ws) ws.close();
   show(loginView);
 }

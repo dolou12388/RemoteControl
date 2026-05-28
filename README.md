@@ -24,6 +24,7 @@
 - 手机端显示当前账号下的在线电脑
 - 电脑输入框获得焦点时，手机端显示远程输入栏
 - Linux 服务器一键部署，支持 systemd 和 Nginx 反向代理
+- 内置会话过期、登录限流、消息验证、设备超时和健康检查
 
 ## 架构说明
 
@@ -73,6 +74,8 @@ DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' 
 ```
 
 脚本会自动安装依赖、创建 `/opt/control-mouse`、配置 systemd、启动服务，并在提供 `DOMAIN` 时自动配置 Nginx 反向代理。
+
+再次部署时，脚本会先创建 `/opt/control-mouse.backup.<时间>` 备份目录，并保留已有 `.env`、`data/` 和虚拟环境。
 
 默认端口：
 
@@ -135,6 +138,7 @@ http://SERVER_IP:2345
 在把服务暴露到公网之前，请至少确认：
 
 - 使用足够长的随机密码。
+- 新注册密码至少 8 位，并包含大写字母和数字。
 - 开启 HTTPS。
 - 不要把 `server/.env` 和 `server/data/` 上传到 Git。
 - 不要复用其他网站或服务的密码。
@@ -142,6 +146,12 @@ http://SERVER_IP:2345
 - 保持服务器系统和依赖更新。
 - 使用 Nginx + HTTPS 时，公网只开放 `80`、`443`、`22` 等必要端口。
 - 不要在自己的账号下运行来源不可信的电脑端客户端。
+
+服务端提供健康检查端点：
+
+```text
+/health
+```
 
 更多说明见 [SECURITY.md](SECURITY.md)。
 
@@ -196,6 +206,7 @@ Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scro
 - Online desktop list on the phone
 - Remote text input: when a text field is focused on the PC, the phone shows an input bar
 - One-command Linux deployment with systemd and optional Nginx reverse proxy
+- Built-in session expiry, login rate limiting, message validation, device timeout, and health check
 
 ## Architecture
 
@@ -245,6 +256,8 @@ DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' 
 ```
 
 The script installs dependencies, creates `/opt/control-mouse`, configures systemd, starts the service, and configures Nginx when `DOMAIN` is provided.
+
+On redeploy, the script creates a `/opt/control-mouse.backup.<timestamp>` backup and keeps existing `.env`, `data/`, and virtual environment files.
 
 Default ports:
 
@@ -307,6 +320,7 @@ You can add the page to your home screen from the browser menu to use it like a 
 Before exposing the service to the public internet:
 
 - Use a long random admin password.
+- New account passwords must be at least 8 characters and include an uppercase letter and a number.
 - Enable HTTPS.
 - Keep `server/.env` and `server/data/` out of Git.
 - Do not reuse passwords from other services.
@@ -314,6 +328,12 @@ Before exposing the service to the public internet:
 - Keep the server updated.
 - Restrict inbound ports to `80`, `443`, and `22` when using Nginx + HTTPS.
 - Avoid running untrusted desktop clients under your account.
+
+Health check endpoint:
+
+```text
+/health
+```
 
 See [SECURITY.md](SECURITY.md) for more notes.
 

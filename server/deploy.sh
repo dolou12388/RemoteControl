@@ -18,10 +18,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 apt-get update
 apt-get install -y python3 python3-venv python3-pip nginx rsync
 
+if [[ -d "$APP_DIR" && -n "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+  BACKUP_DIR="$APP_DIR.backup.$(date +%Y%m%d%H%M%S)"
+  cp -a "$APP_DIR" "$BACKUP_DIR"
+  echo "Backup created: $BACKUP_DIR"
+fi
+
 mkdir -p "$APP_DIR"
 rsync -a --delete \
   --exclude "data" \
   --exclude "venv" \
+  --exclude ".env" \
   "$SCRIPT_DIR/" "$APP_DIR/"
 
 python3 -m venv "$APP_DIR/venv"
