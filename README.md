@@ -1,111 +1,169 @@
-# Cloud Phone Mouse Control
+# RemoteControl
 
-一个 C/S 架构的手机控制电脑工具：
+Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scroll wheel, shortcut panel, and remote text input for your Windows computer.
 
-- 服务器端负责账号、电脑在线状态和 WebSocket 消息中转。
-- 手机端使用浏览器打开网页，登录后选择在线电脑进行控制。
-- Windows 电脑端使用 C# WinForms 客户端登录上线，双击 exe 即可使用。
+> 手机控制电脑鼠标的 C/S 工具。服务器负责账号和消息中转，手机打开网页，Windows 电脑端双击 exe 登录上线。
 
-## 功能
+## Why This Project
 
-- 手机触控板控制电脑鼠标移动
-- 左键 / 中键 / 右键选择
-- 单击、双击、长按拖动
-- 双指滚动
-- 放大 / 缩小按钮
-- 复制、粘贴、撤销、保存、回车、Esc
-- 手机网页注册 / 登录
-- 手机显示电脑在线状态
-- 电脑输入框获得焦点时，手机端显示远程输入栏
+- **No app store required**: the phone client is a mobile web app.
+- **Simple desktop client**: the Windows side is a C# WinForms app that users can open by double-clicking an exe.
+- **Self-hosted relay**: deploy the server on your own VPS instead of relying on a third-party control service.
+- **Account based pairing**: phone and desktop log in with the same account, and the phone sees only that account's online computers.
+- **Designed for practical control**: mouse movement, click, double click, drag, scroll, zoom, shortcuts, and remote text input.
 
-## 目录
+## Features
+
+- Phone touchpad controls Windows mouse movement
+- Left / middle / right mouse button selection
+- Tap, double tap, long-press drag
+- Two-finger scrolling
+- Zoom in / zoom out buttons
+- Common shortcuts: copy, paste, undo, save, Enter, Esc
+- Mobile web login and registration
+- Online desktop list on the phone
+- Remote text input: when a text field is focused on the PC, the phone shows an input bar
+- One-command Linux deployment with systemd and optional Nginx reverse proxy
+
+## Architecture
+
+```text
+Phone browser
+  |
+  | HTTPS / WSS
+  v
+Self-hosted server
+  - login / register
+  - device presence
+  - WebSocket relay
+  |
+  | WSS
+  v
+Windows desktop client
+  - receives mouse / keyboard commands
+  - sends text-input focus status
+```
+
+The server relays commands between authenticated phone and desktop clients. It does not provide screen streaming.
+
+## Repository Layout
 
 ```text
 server/
-  cloud_server.py              云端服务
-  cs_web/                      手机网页端
-  deploy.sh                    Linux 一键部署脚本
-  control-mouse.service        systemd 服务模板
-  nginx-control-mouse.conf     Nginx 反向代理模板
-  requirements.txt             Python 依赖
+  cloud_server.py              Python relay server
+  cs_web/                      Mobile web client
+  deploy.sh                    One-command Linux deploy script
+  control-mouse.service        systemd service template
+  nginx-control-mouse.conf     Nginx reverse proxy template
+  requirements.txt             Python dependencies
 
 desktop-windows/
-  Program.cs                   Windows C# 客户端源码
-  build.bat                    生成 Windows exe
+  Program.cs                   Windows C# desktop client
+  build.bat                    Builds ControlMouseDesktop.exe
 ```
 
-## 一键部署服务器
+## Quick Deploy
 
-把仓库上传到 Linux 服务器后执行：
+On a fresh Ubuntu/Debian server:
 
 ```bash
-cd server
-DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='your-password' bash deploy.sh
+git clone https://github.com/dolou12388/RemoteControl.git
+cd RemoteControl/server
+DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' bash deploy.sh
 ```
 
-脚本会自动：
+The script installs dependencies, creates `/opt/control-mouse`, configures systemd, starts the service, and configures Nginx when `DOMAIN` is provided.
 
-- 安装 Python、Nginx、rsync
-- 创建 `/opt/control-mouse`
-- 创建 Python 虚拟环境
-- 安装依赖
-- 写入 `.env`
-- 创建并启动 `control-mouse.service`
-- 如果设置了 `DOMAIN`，自动配置 Nginx 反向代理
+Default ports:
 
-默认端口：
+- HTTP: `2345`
+- WebSocket: `2346`
 
-- HTTP：`2345`
-- WebSocket：`2346`
-
-部署完成后访问：
+Open:
 
 ```text
 http://your-domain.com
 ```
 
-需要 HTTPS 时，可以在服务器上安装 Certbot 后执行：
+## Enable HTTPS
+
+HTTPS is strongly recommended for public deployment.
 
 ```bash
+apt-get install -y certbot python3-certbot-nginx
 certbot --nginx -d your-domain.com
 ```
 
-## 构建 Windows 电脑端 exe
-
-在 Windows 上进入：
-
-```bat
-desktop-windows
-```
-
-双击 `build.bat`，会生成：
-
-```text
-ControlMouseDesktop.exe
-```
-
-用户只需要双击这个 exe，填写服务器地址、账号、密码，然后点“登录并上线”。
-
-服务器地址示例：
+Then use:
 
 ```text
 https://your-domain.com
 ```
 
-如果没有 HTTPS，也可以用：
+## Build the Windows Desktop Client
 
-```text
-http://服务器IP:2345
+On Windows:
+
+```bat
+cd desktop-windows
+build.bat
 ```
 
-## 手机端使用
+This creates:
 
-手机浏览器打开服务器地址，注册或登录账号，选择在线电脑即可控制。
+```text
+ControlMouseDesktop.exe
+```
 
-手机浏览器可以通过“添加到主屏幕”把网页作为 App 使用。
+Open the exe, enter your server URL, username, password, and computer name, then click **Login and Online**.
 
-## 生产注意
+Server URL examples:
 
-- 首次部署后请使用强密码。
-- 推荐开启 HTTPS，否则部分浏览器功能会受限。
-- 手机网页自动弹出输入法受浏览器限制；如果没有自动弹出，点一下远程输入栏即可。
+```text
+https://your-domain.com
+http://SERVER_IP:2345
+```
+
+## Use on Phone
+
+Open the server URL in your phone browser, log in, select an online computer, and start controlling it.
+
+You can add the page to your home screen from the browser menu to use it like a lightweight app.
+
+## Safe Deployment Checklist
+
+Before exposing the service to the public internet:
+
+- Use a long random admin password.
+- Enable HTTPS.
+- Keep `server/.env` and `server/data/` out of Git.
+- Do not reuse passwords from other services.
+- Prefer a dedicated low-privilege VPS.
+- Keep the server updated.
+- Restrict inbound ports to `80`, `443`, and `22` when using Nginx + HTTPS.
+- Avoid running untrusted desktop clients under your account.
+
+See [SECURITY.md](SECURITY.md) for more notes.
+
+## Limitations
+
+- This is not a screen-sharing tool. It sends mouse, keyboard, and text commands only.
+- Browser rules may block automatic mobile keyboard popup. If the input bar appears but the keyboard does not open, tap the input bar once.
+- The desktop client currently targets Windows.
+
+## Roadmap Ideas
+
+- Release prebuilt Windows binaries
+- Pairing codes or invite links
+- Device management page
+- Optional rate limiting and lockout
+- Docker deployment
+- Tray icon and auto-start for the Windows client
+
+## Star The Project
+
+If this project helps you, please consider giving it a star. It helps others discover a small self-hosted alternative for phone-to-PC control.
+
+## License
+
+MIT
