@@ -50,12 +50,19 @@ systemctl enable control-mouse
 systemctl restart control-mouse
 
 if [[ -n "$DOMAIN" ]]; then
-  sed \
-    -e "s/server_name example.com;/server_name $DOMAIN;/" \
-    -e "s/127.0.0.1:2345/127.0.0.1:$HTTP_PORT/g" \
-    -e "s/127.0.0.1:2346/127.0.0.1:$WS_PORT/g" \
-    "$APP_DIR/nginx-control-mouse.conf" > /etc/nginx/sites-available/control-mouse
-  ln -sf /etc/nginx/sites-available/control-mouse /etc/nginx/sites-enabled/control-mouse
+  DOMAIN_PATTERN="${DOMAIN//./\\.}"
+  EXISTING_ENABLED_SITE="$(grep -Rsl "server_name .*${DOMAIN_PATTERN}" /etc/nginx/sites-enabled 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$EXISTING_ENABLED_SITE" ]]; then
+    echo "Existing enabled Nginx site found for $DOMAIN: $EXISTING_ENABLED_SITE"
+    echo "Leaving existing Nginx site in place."
+  else
+    sed \
+      -e "s/server_name example.com;/server_name $DOMAIN;/" \
+      -e "s/127.0.0.1:2345/127.0.0.1:$HTTP_PORT/g" \
+      -e "s/127.0.0.1:2346/127.0.0.1:$WS_PORT/g" \
+      "$APP_DIR/nginx-control-mouse.conf" > /etc/nginx/sites-available/control-mouse
+    ln -sf /etc/nginx/sites-available/control-mouse /etc/nginx/sites-enabled/control-mouse
+  fi
   nginx -t
   systemctl reload nginx
 fi
