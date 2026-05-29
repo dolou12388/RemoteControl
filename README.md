@@ -204,10 +204,7 @@ http://SERVER_IP:2345
 
 - 发布预编译 Windows exe
 - 配对码或邀请链接
-- 设备管理页面
-- 登录频率限制和锁定
 - Docker 部署
-- Windows 托盘图标和开机自启
 
 ## Star 支持
 
@@ -243,9 +240,11 @@ Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scro
 - Common shortcuts: copy, paste, undo, save, Enter, Esc
 - Mobile web login and registration
 - Online desktop list on the phone
+- Device management page with last-seen time, connect action, and offline-device deletion
 - Remote text input: when a text field is focused on the PC, the phone shows an input bar
 - One-command Linux deployment with systemd and optional Nginx reverse proxy
-- Built-in session expiry, login rate limiting, message validation, device timeout, and health check
+- Built-in session expiry, login rate limiting and lockout, message validation, device timeout, and health check
+- Windows desktop client supports a tray icon, minimize-to-tray, and per-user auto-start
 
 ## Architecture
 
