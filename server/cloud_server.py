@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "cs_web"
 DATA_DIR = ROOT / "data"
 USERS_FILE = DATA_DIR / "users.json"
+DEVICES_FILE = DATA_DIR / "devices.json"
 HTTP_PORT = int(os.environ.get("CS_HTTP_PORT", "8000"))
 WS_PORT = int(os.environ.get("CS_WS_PORT", "8765"))
 PUBLIC_WS = os.environ.get("CS_PUBLIC_WS", str(WS_PORT))
@@ -26,6 +27,9 @@ LOGIN_RATE_LIMIT = int(os.environ.get("CS_LOGIN_RATE_LIMIT", "5"))
 LOGIN_RATE_WINDOW = int(os.environ.get("CS_LOGIN_RATE_WINDOW", "300"))
 LOGIN_LOCK_SECONDS = int(os.environ.get("CS_LOGIN_LOCK_SECONDS", "900"))
 DEVICE_TIMEOUT = int(os.environ.get("CS_DEVICE_TIMEOUT", "60"))
+PAIRING_CODE_TTL = int(os.environ.get("CS_PAIRING_CODE_TTL", "300"))
+ALLOW_PUBLIC_REGISTRATION = os.environ.get("CS_ALLOW_REGISTRATION", "false").lower() in ("1", "true", "yes", "on")
+REGISTRATION_INVITE = os.environ.get("CS_REGISTRATION_INVITE", "")
 START_TIME = time.time()
 
 logging.basicConfig(
@@ -35,11 +39,11 @@ logging.basicConfig(
 logger = logging.getLogger("control-mouse")
 
 sessions = {}
-devices = {}
 mobile_clients = {}
 login_attempts = {}
 login_lockouts = {}
-state_lock = threading.Lock()
+pairing_codes = {}
+state_lock = threading.RLock()
 
 
 def hash_password(password, salt=None):
@@ -76,6 +80,50 @@ def save_users():
     USERS_FILE.write_text(json.dumps(USERS, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def load_devices():
+    DATA_DIR.mkdir(exist_ok=True)
+    if not DEVICES_FILE.exists():
+        return {}
+    try:
+        raw_devices = json.loads(DEVICES_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to load devices file: %s", exc)
+        return {}
+
+    loaded = {}
+    for device_id, device in raw_devices.items():
+        if not isinstance(device, dict):
+            continue
+        loaded[device_id] = {
+            "id": device.get("id", device_id),
+            "name": device.get("name", "电脑端"),
+            "username": device.get("username", ""),
+            "online": False,
+            "last_seen": float(device.get("last_seen", 0)),
+            "ws": None,
+        }
+    return loaded
+
+
+devices = load_devices()
+
+
+def save_devices():
+    DATA_DIR.mkdir(exist_ok=True)
+    with state_lock:
+        snapshot = {
+            device_id: {
+                "id": device["id"],
+                "name": device["name"],
+                "username": device["username"],
+                "online": False,
+                "last_seen": device["last_seen"],
+            }
+            for device_id, device in devices.items()
+        }
+    DEVICES_FILE.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def json_response(handler, status, payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -90,6 +138,26 @@ def read_json(handler):
     length = int(handler.headers.get("Content-Length", "0"))
     raw = handler.rfile.read(length).decode("utf-8")
     return json.loads(raw or "{}")
+
+
+def auth_header_token(handler):
+    header = handler.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip()
+    return ""
+
+
+def request_token(handler, parsed=None, data=None):
+    token = auth_header_token(handler)
+    if token:
+        return token
+    if data:
+        token = data.get("token", "")
+        if token:
+            return token
+    if parsed:
+        return parse_qs(parsed.query).get("token", [""])[0]
+    return ""
 
 
 def client_ip(handler):
@@ -165,6 +233,43 @@ def clear_account_login_failures(username, ip):
     with state_lock:
         login_attempts.pop(key, None)
         login_lockouts.pop(key, None)
+
+
+def cleanup_pairing_codes(now=None):
+    now = now or time.time()
+    with state_lock:
+        for code, item in list(pairing_codes.items()):
+            if item["expires_at"] <= now:
+                del pairing_codes[code]
+
+
+def create_pairing_code(username):
+    now = time.time()
+    with state_lock:
+        cleanup_pairing_codes(now)
+        for _ in range(20):
+            code = str(secrets.randbelow(1000000)).zfill(6)
+            if code not in pairing_codes:
+                expires_at = now + PAIRING_CODE_TTL
+                pairing_codes[code] = {"username": username, "expires_at": expires_at}
+                return code, expires_at
+    raise RuntimeError("failed_to_create_pairing_code")
+
+
+def consume_pairing_code(code):
+    now = time.time()
+    with state_lock:
+        cleanup_pairing_codes(now)
+        item = pairing_codes.pop(code, None)
+        if not item or item["expires_at"] <= now:
+            return None
+        return item["username"]
+
+
+def can_register_with_invite(invite_code):
+    if ALLOW_PUBLIC_REGISTRATION:
+        return True
+    return bool(REGISTRATION_INVITE) and secrets.compare_digest(invite_code or "", REGISTRATION_INVITE)
 
 
 def cleanup_sessions(now=None):
@@ -258,7 +363,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/api/login", "/api/register"):
+        if path not in ("/api/login", "/api/register", "/api/pairing-code", "/api/pair-desktop"):
             json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
 
@@ -271,11 +376,35 @@ class Handler(SimpleHTTPRequestHandler):
             json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_json"})
             return
 
+        if path == "/api/pairing-code":
+            username = validate_token(request_token(self, data=data))
+            if not username:
+                json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_token"})
+                return
+            code, expires_at = create_pairing_code(username)
+            json_response(self, HTTPStatus.CREATED, {"code": code, "expiresAt": expires_at, "ttl": PAIRING_CODE_TTL})
+            return
+
+        if path == "/api/pair-desktop":
+            pairing_code = str(data.get("code", "")).strip().replace(" ", "")
+            username = consume_pairing_code(pairing_code)
+            if not username:
+                json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_pairing_code"})
+                return
+            token = secrets.token_urlsafe(32)
+            with state_lock:
+                sessions[token] = {"username": username, "last_seen": time.time()}
+            json_response(self, HTTPStatus.OK, {"token": token, "username": username})
+            return
+
         if not username or len(username) < 3:
             json_response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid_input"})
             return
 
         if path == "/api/register":
+            if not can_register_with_invite(data.get("inviteCode", "")):
+                json_response(self, HTTPStatus.FORBIDDEN, {"error": "registration_closed"})
+                return
             is_valid_password, error = validate_password(password)
             if not is_valid_password:
                 json_response(self, HTTPStatus.BAD_REQUEST, {"error": error})
@@ -330,7 +459,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/devices":
-            token = parse_qs(parsed.query).get("token", [""])[0]
+            token = request_token(self, parsed=parsed)
             username = validate_token(token)
             if not username:
                 json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_token"})
@@ -339,7 +468,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/config.js":
-            payload = f"window.CS_WS_PORT = {json.dumps(PUBLIC_WS)};\n"
+            config = {
+                "wsPort": PUBLIC_WS,
+                "allowPublicRegistration": ALLOW_PUBLIC_REGISTRATION,
+                "registrationInviteRequired": bool(REGISTRATION_INVITE) and not ALLOW_PUBLIC_REGISTRATION,
+                "pairingCodeTtl": PAIRING_CODE_TTL,
+            }
+            payload = f"window.CS_WS_PORT = {json.dumps(PUBLIC_WS)};\nwindow.CS_CONFIG = {json.dumps(config, ensure_ascii=False)};\n"
             body = payload.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
@@ -358,7 +493,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         query = parse_qs(parsed.query)
-        token = query.get("token", [""])[0]
+        token = request_token(self, parsed=parsed)
         device_id = query.get("id", [""])[0]
         username = validate_token(token)
         if not username:
@@ -377,6 +512,7 @@ class Handler(SimpleHTTPRequestHandler):
                 json_response(self, HTTPStatus.CONFLICT, {"error": "device_online"})
                 return
             del devices[device_id]
+            save_devices()
 
         json_response(self, HTTPStatus.OK, {"devices": user_devices(username)})
 
@@ -408,6 +544,7 @@ async def websocket_handler(websocket):
                 "last_seen": time.time(),
                 "ws": websocket,
             }
+            save_devices()
         await notify_devices(username)
         try:
             async for message in websocket:
@@ -441,6 +578,7 @@ async def websocket_handler(websocket):
                     devices[device_id]["online"] = False
                     devices[device_id]["last_seen"] = time.time()
                     devices[device_id]["ws"] = None
+                    save_devices()
             logger.info("Desktop offline: %s (%s)", device_name, device_id)
             await notify_devices(username)
         return
@@ -500,6 +638,8 @@ async def cleanup_stale_state():
                     device["ws"] = None
                     device["last_seen"] = now
                     notify_users.add(device["username"])
+            if notify_users:
+                save_devices()
         for user in notify_users:
             await notify_devices(user)
 

@@ -6,9 +6,13 @@ const loginError = document.querySelector("#loginError");
 const registerButton = document.querySelector("#registerButton");
 const usernameInput = document.querySelector("#username");
 const passwordInput = document.querySelector("#password");
+const inviteCodeRow = document.querySelector("#inviteCodeRow");
+const inviteCodeInput = document.querySelector("#inviteCode");
 const userLabel = document.querySelector("#userLabel");
 const deviceList = document.querySelector("#deviceList");
 const logoutButton = document.querySelector("#logoutButton");
+const pairingButton = document.querySelector("#pairingButton");
+const pairingText = document.querySelector("#pairingText");
 const backButton = document.querySelector("#backButton");
 const deviceStatus = document.querySelector("#deviceStatus");
 const pad = document.querySelector("#pad");
@@ -62,6 +66,9 @@ let longPressTimer = null;
 let longPressActive = false;
 let longPressButton = "left";
 let zoomRepeatTimer = null;
+let pairingTimer = null;
+
+const config = window.CS_CONFIG || {};
 
 function basePath() {
   const path = location.pathname;
@@ -75,7 +82,7 @@ function appUrl(path) {
 
 function wsUrl() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const port = window.CS_WS_PORT;
+  const port = config.wsPort || window.CS_WS_PORT;
   const host = port === "same-origin" ? location.host : port ? `${location.hostname}:${port}` : location.host;
   return `${protocol}//${host}${appUrl("/ws")}?role=mobile&token=${encodeURIComponent(token)}`;
 }
@@ -137,6 +144,20 @@ async function fetchWithTimeout(url, options, timeout = FETCH_TIMEOUT_MS) {
     throw error;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+function authHeaders(extra = {}) {
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+}
+
+function applyRegistrationConfig() {
+  const registrationAvailable = Boolean(config.allowPublicRegistration || config.registrationInviteRequired);
+  registerButton.hidden = !registrationAvailable;
+  inviteCodeRow.classList.toggle("hidden", !config.registrationInviteRequired);
+  inviteCodeInput.required = Boolean(config.registrationInviteRequired);
+  if (!registrationAvailable) {
+    loginError.textContent = "公开注册已关闭，请使用服务器管理员创建的账号登录";
   }
 }
 
@@ -215,6 +236,7 @@ function renderDevices() {
 async function deleteDevice(deviceId) {
   const response = await fetchWithTimeout(appUrl(`/api/devices?token=${encodeURIComponent(token)}&id=${encodeURIComponent(deviceId)}`), {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (response.status === 409) {
     alert("在线设备不能删除，请先让电脑端下线");
@@ -227,6 +249,30 @@ async function deleteDevice(deviceId) {
   const result = await response.json();
   devices = result.devices;
   renderDevices();
+}
+
+async function generatePairingCode() {
+  pairingText.textContent = "正在生成配对码...";
+  const response = await fetchWithTimeout(appUrl("/api/pairing-code"), {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({}),
+  });
+  if (!response.ok) {
+    pairingText.textContent = "生成失败，请重新登录后再试";
+    return;
+  }
+  const result = await response.json();
+  const code = result.code.replace(/(\d{3})(\d{3})/, "$1 $2");
+  const expiresAt = result.expiresAt * 1000;
+  clearInterval(pairingTimer);
+  const render = () => {
+    const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    pairingText.textContent = seconds > 0 ? `配对码：${code}，${seconds} 秒后失效` : "配对码已失效，请重新生成";
+    if (seconds <= 0) clearInterval(pairingTimer);
+  };
+  render();
+  pairingTimer = setInterval(render, 1000);
 }
 
 function connectWs() {
@@ -281,9 +327,10 @@ async function registerAccount(usernameValue, passwordValue) {
   const response = await fetchWithTimeout(appUrl("/api/register"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: usernameValue, password: passwordValue }),
+    body: JSON.stringify({ username: usernameValue, password: passwordValue, inviteCode: inviteCodeInput.value.trim() }),
   });
   if (response.status === 409) throw new Error("账号已存在");
+  if (response.status === 403) throw new Error("注册已关闭或邀请码错误");
   if (response.status === 400) throw new Error("注册失败，账号至少3位，密码至少8位，并包含大写字母和数字");
   if (!response.ok) throw new Error("注册失败，请稍后重试");
   return response.json();
@@ -395,6 +442,7 @@ registerButton.addEventListener("click", async () => {
 });
 
 logoutButton.addEventListener("click", logout);
+pairingButton.addEventListener("click", generatePairingCode);
 backButton.addEventListener("click", () => show(devicesView));
 
 controls.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -572,3 +620,5 @@ if (token && username) {
 } else {
   show(loginView);
 }
+
+applyRegistrationConfig();

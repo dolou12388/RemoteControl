@@ -6,6 +6,8 @@ RemoteControl is designed for self-hosted personal or small-team use. It relays 
 
 - Use HTTPS/WSS in production.
 - Use a long random password for every account.
+- Keep public registration disabled unless you intentionally need it.
+- Prefer invite-code registration or phone-generated pairing codes for onboarding desktops.
 - Keep the built-in login rate limit enabled.
 - Keep `.env` and `server/data/` private.
 - Run the server on a VPS you control.
@@ -34,9 +36,8 @@ The project does not currently include:
 - multi-factor authentication
 - per-device approval
 - audit logs
-- encrypted local storage for desktop credentials
 
-The server includes basic login rate limiting, session expiry, message validation, device timeout checks, and a `/health` endpoint. These are baseline protections, not a substitute for HTTPS, strong passwords, and careful server access control.
+The server includes registration controls, invite-code registration, one-time desktop pairing codes, basic login rate limiting, session expiry, message validation, device timeout checks, and a `/health` endpoint. The Windows desktop client can store saved credentials with current-user DPAPI encryption. These are baseline protections, not a substitute for HTTPS, strong passwords, and careful server access control.
 
 For public or multi-user deployments, consider adding these protections before relying on it for sensitive machines.
 

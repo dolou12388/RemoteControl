@@ -7,6 +7,9 @@ HTTP_PORT="${HTTP_PORT:-2345}"
 WS_PORT="${WS_PORT:-2346}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-change-this-password}"
+ALLOW_REGISTRATION="${ALLOW_REGISTRATION:-false}"
+REGISTRATION_INVITE="${REGISTRATION_INVITE:-}"
+PAIRING_CODE_TTL="${PAIRING_CODE_TTL:-300}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Please run as root."
@@ -35,13 +38,33 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --upgrade pip
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-cat > "$APP_DIR/.env" <<EOF_ENV
+ensure_env_value() {
+  local key="$1"
+  local value="$2"
+  if ! grep -q "^${key}=" "$APP_DIR/.env"; then
+    echo "${key}=${value}" >> "$APP_DIR/.env"
+  fi
+}
+
+if [[ ! -f "$APP_DIR/.env" ]]; then
+  cat > "$APP_DIR/.env" <<EOF_ENV
 CS_HTTP_PORT=$HTTP_PORT
 CS_WS_PORT=$WS_PORT
 CS_PUBLIC_WS=same-origin
 CS_ADMIN_USER=$ADMIN_USER
 CS_ADMIN_PASS=$ADMIN_PASS
+CS_ALLOW_REGISTRATION=$ALLOW_REGISTRATION
+CS_REGISTRATION_INVITE=$REGISTRATION_INVITE
+CS_PAIRING_CODE_TTL=$PAIRING_CODE_TTL
 EOF_ENV
+else
+  ensure_env_value "CS_HTTP_PORT" "$HTTP_PORT"
+  ensure_env_value "CS_WS_PORT" "$WS_PORT"
+  ensure_env_value "CS_PUBLIC_WS" "same-origin"
+  ensure_env_value "CS_ALLOW_REGISTRATION" "$ALLOW_REGISTRATION"
+  ensure_env_value "CS_REGISTRATION_INVITE" "$REGISTRATION_INVITE"
+  ensure_env_value "CS_PAIRING_CODE_TTL" "$PAIRING_CODE_TTL"
+fi
 chmod 600 "$APP_DIR/.env"
 
 cp "$APP_DIR/control-mouse.service" /etc/systemd/system/control-mouse.service

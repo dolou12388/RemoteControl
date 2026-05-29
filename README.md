@@ -21,12 +21,16 @@
 - 支持放大 / 缩小按钮
 - 常用快捷键：复制、粘贴、撤销、保存、回车、Esc
 - 手机网页端支持注册 / 登录
+- 默认关闭公开注册，可开启公开注册或使用邀请码注册
 - 手机端显示当前账号下的在线电脑
 - 手机端设备管理页支持查看最后在线时间、连接在线设备、删除离线设备
+- 手机端可生成一次性配对码，Windows 电脑端无需输入账号密码即可配对上线
 - 电脑输入框获得焦点时，手机端显示远程输入栏
 - Linux 服务器一键部署，支持 systemd 和 Nginx 反向代理
 - 内置会话过期、登录限流和锁定、消息验证、设备超时和健康检查
-- Windows 电脑端支持托盘图标、最小化到托盘和当前用户开机自启
+- 设备信息持久化保存，服务重启后仍可查看历史离线设备
+- Windows 电脑端支持托盘图标、最小化到托盘、保存配置、自动上线和当前用户开机自启
+- GitHub Actions 自动构建 Windows exe，推送 `v*` 标签时自动上传 Release 附件
 
 ## 架构说明
 
@@ -77,7 +81,19 @@ DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' 
 
 脚本会自动安装依赖、创建 `/opt/control-mouse`、配置 systemd、启动服务，并在提供 `DOMAIN` 时自动配置 Nginx 反向代理。
 
-再次部署时，脚本会先创建 `/opt/control-mouse.backup.<时间>` 备份目录，并保留已有 `.env`、`data/` 和虚拟环境。
+再次部署时，脚本会先创建 `/opt/control-mouse.backup.<时间>` 备份目录，并保留已有 `.env`、`data/` 和虚拟环境。已有 `.env` 不会被覆盖，脚本只会补充缺失的新配置项。
+
+默认关闭公开注册。需要允许公开注册时添加：
+
+```bash
+ALLOW_REGISTRATION=true bash deploy.sh
+```
+
+更推荐使用邀请码注册：
+
+```bash
+REGISTRATION_INVITE='your-invite-code' bash deploy.sh
+```
 
 默认端口：
 
@@ -109,6 +125,13 @@ bash deploy.sh
 ```
 
 如果之前修改过端口，请继续使用原来的 `HTTP_PORT` 和 `WS_PORT`。如果已经配置过 HTTPS，脚本会保留已有 Nginx 站点配置，只更新应用代码并重启服务。
+
+已有部署的 `.env` 会保留。如需调整注册开关、邀请码或配对码有效期，可以编辑：
+
+```bash
+nano /opt/control-mouse/.env
+systemctl restart control-mouse
+```
 
 更新后检查：
 
@@ -165,6 +188,10 @@ https://your-domain.com
 http://SERVER_IP:2345
 ```
 
+也可以在手机端登录后点击“生成配对码”，然后在 Windows 端输入 6 位配对码并点击“配对码上线”。勾选“保存配置并自动上线”后，电脑端会用当前用户 DPAPI 加密保存密码，下次启动时自动登录上线。
+
+GitHub Actions 会在每次推送后构建 Windows exe。创建 `v*` 标签发布版本时，会自动把 `ControlMouseDesktop.exe` 上传到 GitHub Release。
+
 ## 手机端使用
 
 手机浏览器打开服务器地址，登录账号，选择在线电脑即可开始控制。
@@ -202,9 +229,9 @@ http://SERVER_IP:2345
 
 ## 后续计划
 
-- 发布预编译 Windows exe
-- 配对码或邀请链接
 - Docker 部署
+- 多平台桌面端
+- 自定义快捷键管理
 
 ## Star 支持
 
@@ -239,12 +266,16 @@ Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scro
 - Zoom in / zoom out buttons
 - Common shortcuts: copy, paste, undo, save, Enter, Esc
 - Mobile web login and registration
+- Public registration is disabled by default; enable it explicitly or use invite-code registration
 - Online desktop list on the phone
 - Device management page with last-seen time, connect action, and offline-device deletion
+- One-time pairing codes let the Windows desktop client come online without typing the account password
 - Remote text input: when a text field is focused on the PC, the phone shows an input bar
 - One-command Linux deployment with systemd and optional Nginx reverse proxy
 - Built-in session expiry, login rate limiting and lockout, message validation, device timeout, and health check
-- Windows desktop client supports a tray icon, minimize-to-tray, and per-user auto-start
+- Device metadata is persisted so offline device history survives server restarts
+- Windows desktop client supports a tray icon, minimize-to-tray, saved settings, auto-online, and per-user auto-start
+- GitHub Actions builds the Windows exe automatically and uploads it to tagged `v*` releases
 
 ## Architecture
 
@@ -295,7 +326,19 @@ DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' 
 
 The script installs dependencies, creates `/opt/control-mouse`, configures systemd, starts the service, and configures Nginx when `DOMAIN` is provided.
 
-On redeploy, the script creates a `/opt/control-mouse.backup.<timestamp>` backup and keeps existing `.env`, `data/`, and virtual environment files.
+On redeploy, the script creates a `/opt/control-mouse.backup.<timestamp>` backup and keeps existing `.env`, `data/`, and virtual environment files. Existing `.env` files are not overwritten; missing new settings are appended.
+
+Public registration is disabled by default. To enable it:
+
+```bash
+ALLOW_REGISTRATION=true bash deploy.sh
+```
+
+Invite-code registration is recommended:
+
+```bash
+REGISTRATION_INVITE='your-invite-code' bash deploy.sh
+```
 
 Default ports:
 
@@ -323,6 +366,31 @@ Then use:
 https://your-domain.com
 ```
 
+## Update an Existing Deployment
+
+If an older version is already deployed, pull the latest code and run the deployment script again:
+
+```bash
+cd /tmp
+rm -rf RemoteControl
+git clone https://github.com/dolou12388/RemoteControl.git
+cd RemoteControl/server
+
+DOMAIN=your-domain.com \
+HTTP_PORT=2345 \
+WS_PORT=2346 \
+ADMIN_USER=admin \
+ADMIN_PASS='use-a-long-random-password' \
+bash deploy.sh
+```
+
+Use the same `HTTP_PORT` and `WS_PORT` values as your existing deployment if you changed them. To change registration, invite, or pairing-code settings later, edit `/opt/control-mouse/.env` and restart the service:
+
+```bash
+nano /opt/control-mouse/.env
+systemctl restart control-mouse
+```
+
 ## Build the Windows Desktop Client
 
 On Windows:
@@ -346,6 +414,10 @@ Server URL examples:
 https://your-domain.com
 http://SERVER_IP:2345
 ```
+
+Alternatively, log in on the phone, click **Generate pairing code**, enter the 6-digit code in the Windows desktop client, and click **Pairing Login**. When **Save settings and auto-online** is enabled, the client stores the password encrypted with the current Windows user's DPAPI and automatically comes online on the next launch.
+
+GitHub Actions builds the Windows exe on every push. When you create a `v*` tag, `ControlMouseDesktop.exe` is uploaded to the GitHub Release automatically.
 
 ## Use on Phone
 
@@ -383,9 +455,9 @@ See [SECURITY.md](SECURITY.md) for more notes.
 
 ## Roadmap Ideas
 
-- Release prebuilt Windows binaries
-- Pairing codes or invite links
 - Docker deployment
+- Multi-platform desktop clients
+- Custom shortcut management
 
 ## Star The Project
 

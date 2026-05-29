@@ -26,6 +26,10 @@
             <span>密码</span>
             <input id="password" type="password" autocomplete="current-password" required />
           </label>
+          <label id="inviteCodeRow" class="hidden">
+            <span>邀请码</span>
+            <input id="inviteCode" autocomplete="one-time-code" />
+          </label>
           <button class="primary-button" type="submit">登录</button>
           <button id="registerButton" class="secondary-button" type="button">注册账号</button>
           <p id="loginError" class="error-text"></p>
@@ -40,6 +44,13 @@
           </div>
           <button id="logoutButton" class="ghost-button" type="button">退出</button>
         </header>
+        <section class="pairing-panel">
+          <div>
+            <h3>电脑端配对</h3>
+            <p id="pairingText">在电脑端选择“配对码上线”，再输入这里生成的 6 位码。</p>
+          </div>
+          <button id="pairingButton" class="secondary-button" type="button">生成配对码</button>
+        </section>
         <div id="deviceList" class="device-list"></div>
       </section>
 

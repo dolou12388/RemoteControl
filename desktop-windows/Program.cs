@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using Microsoft.Win32;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,11 +37,14 @@ namespace ControlMouseCSharp
         private readonly TextBox usernameBox = new TextBox();
         private readonly TextBox passwordBox = new TextBox();
         private readonly TextBox deviceNameBox = new TextBox();
+        private readonly TextBox pairingCodeBox = new TextBox();
         private readonly Label statusLabel = new Label();
         private readonly Button loginButton = new Button();
+        private readonly Button pairingLoginButton = new Button();
         private readonly Button registerButton = new Button();
         private readonly Button offlineButton = new Button();
         private readonly CheckBox autoStartBox = new CheckBox();
+        private readonly CheckBox autoOnlineBox = new CheckBox();
         private readonly JavaScriptSerializer json = new JavaScriptSerializer();
         private readonly NotifyIcon trayIcon = new NotifyIcon();
 
@@ -52,15 +57,17 @@ namespace ControlMouseCSharp
         {
             Text = "手机鼠标电脑端";
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(500, 430);
-            Size = new Size(520, 490);
+            MinimumSize = new Size(500, 560);
+            Size = new Size(540, 590);
             Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
             BackColor = Color.FromArgb(245, 247, 250);
 
             BuildUi();
             BuildTrayIcon();
+            LoadSettings();
             autoStartBox.Checked = IsAutoStartEnabled();
             autoStartBox.CheckedChanged += delegate { SetAutoStart(autoStartBox.Checked); };
+            autoOnlineBox.CheckedChanged += delegate { SaveSettings(autoOnlineBox.Checked && !string.IsNullOrEmpty(passwordBox.Text)); };
             Resize += delegate
             {
                 if (WindowState == FormWindowState.Minimized)
@@ -69,6 +76,13 @@ namespace ControlMouseCSharp
                 }
             };
             FormClosing += MainForm_FormClosing;
+            Shown += async delegate
+            {
+                if (autoOnlineBox.Checked && !string.IsNullOrWhiteSpace(usernameBox.Text) && !string.IsNullOrEmpty(passwordBox.Text))
+                {
+                    await LoginAndStartAsync();
+                }
+            };
         }
 
         private void BuildUi()
@@ -107,15 +121,28 @@ namespace ControlMouseCSharp
             offlineButton.Click += delegate { StopClient(); };
             Controls.Add(offlineButton);
 
+            AddField("配对码", pairingCodeBox, 348, "");
+
+            pairingLoginButton.Text = "配对码上线";
+            pairingLoginButton.Location = new Point(122, 400);
+            pairingLoginButton.Size = new Size(135, 42);
+            pairingLoginButton.Click += async delegate { await PairingLoginAndStartAsync(); };
+            Controls.Add(pairingLoginButton);
+
             autoStartBox.Text = "开机自动启动";
-            autoStartBox.Location = new Point(28, 344);
+            autoStartBox.Location = new Point(28, 460);
             autoStartBox.Size = new Size(180, 28);
             Controls.Add(autoStartBox);
 
+            autoOnlineBox.Text = "保存配置并自动上线";
+            autoOnlineBox.Location = new Point(210, 460);
+            autoOnlineBox.Size = new Size(220, 28);
+            Controls.Add(autoOnlineBox);
+
             statusLabel.Text = "状态：未上线";
             statusLabel.AutoEllipsis = true;
-            statusLabel.Location = new Point(28, 388);
-            statusLabel.Size = new Size(445, 34);
+            statusLabel.Location = new Point(28, 510);
+            statusLabel.Size = new Size(465, 34);
             Controls.Add(statusLabel);
         }
 
@@ -226,6 +253,7 @@ namespace ControlMouseCSharp
                 });
 
                 token = Convert.ToString(result["token"]);
+                SaveSettings(autoOnlineBox.Checked);
                 cancelSource = new CancellationTokenSource();
                 workerTask = Task.Run(delegate { RunWebSocketLoop(cancelSource.Token).Wait(); });
                 offlineButton.Enabled = true;
@@ -234,6 +262,38 @@ namespace ControlMouseCSharp
             catch (Exception ex)
             {
                 SetStatus("登录失败：" + CleanError(ex.Message));
+            }
+            finally
+            {
+                SetBusy(false, null);
+            }
+        }
+
+        private async Task PairingLoginAndStartAsync()
+        {
+            try
+            {
+                StopClient();
+                SetBusy(true, "正在使用配对码上线...");
+                var result = await Task.Run(delegate
+                {
+                    return PostJson(ApiUrl("/api/pair-desktop"), new Dictionary<string, object>
+                    {
+                        {"code", pairingCodeBox.Text.Trim().Replace(" ", "")}
+                    });
+                });
+
+                token = Convert.ToString(result["token"]);
+                usernameBox.Text = Convert.ToString(result["username"]);
+                SaveSettings(false);
+                cancelSource = new CancellationTokenSource();
+                workerTask = Task.Run(delegate { RunWebSocketLoop(cancelSource.Token).Wait(); });
+                offlineButton.Enabled = true;
+                SetStatus("配对成功，正在连接服务器...");
+            }
+            catch (Exception ex)
+            {
+                SetStatus("配对失败：" + CleanError(ex.Message));
             }
             finally
             {
@@ -492,6 +552,85 @@ namespace ControlMouseCSharp
             }
         }
 
+        private static string SettingsFile()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RemoteControl", "desktop-settings.json");
+        }
+
+        private void LoadSettings()
+        {
+            var file = SettingsFile();
+            if (!File.Exists(file))
+            {
+                return;
+            }
+
+            try
+            {
+                var settings = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(file, Encoding.UTF8));
+                serverBox.Text = SettingText(settings, "server", DefaultServer);
+                usernameBox.Text = SettingText(settings, "username", "");
+                deviceNameBox.Text = SettingText(settings, "deviceName", Environment.MachineName);
+                passwordBox.Text = Unprotect(SettingText(settings, "password", ""));
+                autoOnlineBox.Checked = Bool(settings, "autoOnline", false);
+            }
+            catch
+            {
+                SetStatus("配置读取失败，将使用默认设置");
+            }
+        }
+
+        private void SaveSettings(bool includePassword)
+        {
+            try
+            {
+                var file = SettingsFile();
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                var settings = new Dictionary<string, object>
+                {
+                    {"server", serverBox.Text.Trim()},
+                    {"username", usernameBox.Text.Trim()},
+                    {"deviceName", deviceNameBox.Text.Trim()},
+                    {"autoOnline", autoOnlineBox.Checked},
+                    {"password", includePassword ? Protect(passwordBox.Text) : ""}
+                };
+                File.WriteAllText(file, json.Serialize(settings), Encoding.UTF8);
+            }
+            catch
+            {
+                SetStatus("配置保存失败");
+            }
+        }
+
+        private static string Protect(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "";
+            }
+            var raw = Encoding.UTF8.GetBytes(value);
+            var protectedBytes = ProtectedData.Protect(raw, null, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(protectedBytes);
+        }
+
+        private static string Unprotect(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "";
+            }
+            try
+            {
+                var raw = Convert.FromBase64String(value);
+                var unprotected = ProtectedData.Unprotect(raw, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(unprotected);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         private void StopClient()
         {
             if (cancelSource != null)
@@ -508,11 +647,14 @@ namespace ControlMouseCSharp
         private void SetBusy(bool busy, string message)
         {
             loginButton.Enabled = !busy;
+            pairingLoginButton.Enabled = !busy;
             registerButton.Enabled = !busy;
             serverBox.Enabled = !busy;
             usernameBox.Enabled = !busy;
             passwordBox.Enabled = !busy;
             deviceNameBox.Enabled = !busy;
+            pairingCodeBox.Enabled = !busy;
+            autoOnlineBox.Enabled = !busy;
             if (!string.IsNullOrEmpty(message))
             {
                 SetStatus(message);
@@ -546,10 +688,34 @@ namespace ControlMouseCSharp
             }
             if (message.Contains("invalid_input"))
             {
-                return "用户名至少 3 位，密码至少 6 位";
+                return "用户名至少 3 位，密码至少 8 位，并包含大写字母和数字";
+            }
+            if (message.Contains("registration_closed"))
+            {
+                return "服务器已关闭公开注册，请使用已有账号或邀请码";
+            }
+            if (message.Contains("invalid_pairing_code"))
+            {
+                return "配对码无效或已过期";
+            }
+            if (message.Contains("account_locked") || message.Contains("rate_limited"))
+            {
+                return "登录尝试过多，请稍后再试";
             }
 
             return message.Replace("\r", " ").Replace("\n", " ");
+        }
+
+        private static bool Bool(Dictionary<string, object> values, string key, bool fallback)
+        {
+            object value;
+            return values.TryGetValue(key, out value) ? Convert.ToBoolean(value) : fallback;
+        }
+
+        private static string SettingText(Dictionary<string, object> values, string key, string fallback)
+        {
+            object value;
+            return values.TryGetValue(key, out value) ? Convert.ToString(value) : fallback;
         }
     }
 
