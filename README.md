@@ -22,9 +22,11 @@
 - 常用快捷键：复制、粘贴、撤销、保存、回车、Esc
 - 手机网页端支持注册 / 登录
 - 手机端显示当前账号下的在线电脑
+- 手机端设备管理页支持查看最后在线时间、连接在线设备、删除离线设备
 - 电脑输入框获得焦点时，手机端显示远程输入栏
 - Linux 服务器一键部署，支持 systemd 和 Nginx 反向代理
-- 内置会话过期、登录限流、消息验证、设备超时和健康检查
+- 内置会话过期、登录限流和锁定、消息验证、设备超时和健康检查
+- Windows 电脑端支持托盘图标、最小化到托盘和当前用户开机自启
 
 ## 架构说明
 
@@ -144,6 +146,7 @@ http://SERVER_IP:2345
 - 不要复用其他网站或服务的密码。
 - 优先使用独立的低权限 VPS。
 - 保持服务器系统和依赖更新。
+- 保留默认登录限流配置，必要时通过 `CS_LOGIN_RATE_LIMIT`、`CS_LOGIN_RATE_WINDOW`、`CS_LOGIN_LOCK_SECONDS` 调整。
 - 使用 Nginx + HTTPS 时，公网只开放 `80`、`443`、`22` 等必要端口。
 - 不要在自己的账号下运行来源不可信的电脑端客户端。
 
@@ -347,10 +350,7 @@ See [SECURITY.md](SECURITY.md) for more notes.
 
 - Release prebuilt Windows binaries
 - Pairing codes or invite links
-- Device management page
-- Optional rate limiting and lockout
 - Docker deployment
-- Tray icon and auto-start for the Windows client
 
 ## Star The Project
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using Microsoft.Win32;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.WebSockets;
@@ -38,23 +39,36 @@ namespace ControlMouseCSharp
         private readonly Button loginButton = new Button();
         private readonly Button registerButton = new Button();
         private readonly Button offlineButton = new Button();
+        private readonly CheckBox autoStartBox = new CheckBox();
         private readonly JavaScriptSerializer json = new JavaScriptSerializer();
+        private readonly NotifyIcon trayIcon = new NotifyIcon();
 
         private CancellationTokenSource cancelSource;
         private Task workerTask;
         private string token;
+        private bool exitRequested;
 
         public MainForm()
         {
             Text = "手机鼠标电脑端";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(500, 430);
-            Size = new Size(520, 450);
+            Size = new Size(520, 490);
             Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
             BackColor = Color.FromArgb(245, 247, 250);
 
             BuildUi();
-            FormClosing += delegate { StopClient(); };
+            BuildTrayIcon();
+            autoStartBox.Checked = IsAutoStartEnabled();
+            autoStartBox.CheckedChanged += delegate { SetAutoStart(autoStartBox.Checked); };
+            Resize += delegate
+            {
+                if (WindowState == FormWindowState.Minimized)
+                {
+                    HideToTray();
+                }
+            };
+            FormClosing += MainForm_FormClosing;
         }
 
         private void BuildUi()
@@ -93,11 +107,65 @@ namespace ControlMouseCSharp
             offlineButton.Click += delegate { StopClient(); };
             Controls.Add(offlineButton);
 
+            autoStartBox.Text = "开机自动启动";
+            autoStartBox.Location = new Point(28, 344);
+            autoStartBox.Size = new Size(180, 28);
+            Controls.Add(autoStartBox);
+
             statusLabel.Text = "状态：未上线";
             statusLabel.AutoEllipsis = true;
-            statusLabel.Location = new Point(28, 356);
+            statusLabel.Location = new Point(28, 388);
             statusLabel.Size = new Size(445, 34);
             Controls.Add(statusLabel);
+        }
+
+        private void BuildTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("显示窗口", null, delegate { ShowFromTray(); });
+            menu.Items.Add("登录并上线", null, async delegate { ShowFromTray(); await LoginAndStartAsync(); });
+            menu.Items.Add("下线", null, delegate { StopClient(); });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("退出", null, delegate
+            {
+                exitRequested = true;
+                Close();
+            });
+
+            trayIcon.Text = "手机鼠标电脑端";
+            trayIcon.Icon = SystemIcons.Application;
+            trayIcon.ContextMenuStrip = menu;
+            trayIcon.Visible = true;
+            trayIcon.DoubleClick += delegate { ShowFromTray(); };
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (!exitRequested && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                HideToTray();
+                return;
+            }
+
+            StopClient();
+            trayIcon.Visible = false;
+            trayIcon.Dispose();
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+            ShowInTaskbar = false;
+            trayIcon.ShowBalloonTip(1600, "手机鼠标电脑端", "程序已最小化到托盘，右键托盘图标可退出。", ToolTipIcon.Info);
+        }
+
+        private void ShowFromTray()
+        {
+            ShowInTaskbar = true;
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
         }
 
         private void AddField(string labelText, TextBox box, int y, string value)
@@ -394,6 +462,34 @@ namespace ControlMouseCSharp
                 }
             }
             return Environment.MachineName;
+        }
+
+        private static bool IsAutoStartEnabled()
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
+            {
+                var value = Convert.ToString(key == null ? null : key.GetValue("ControlMouseDesktop")).Trim('"');
+                return string.Equals(value, Application.ExecutablePath, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static void SetAutoStart(bool enabled)
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+            {
+                if (key == null)
+                {
+                    return;
+                }
+                if (enabled)
+                {
+                    key.SetValue("ControlMouseDesktop", "\"" + Application.ExecutablePath + "\"");
+                }
+                else
+                {
+                    key.DeleteValue("ControlMouseDesktop", false);
+                }
+            }
         }
 
         private void StopClient()

@@ -106,6 +106,25 @@ function sendCommand(command) {
   ws.send(JSON.stringify({ type: "command", deviceId: selectedDevice.id, command }));
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
+function formatLastSeen(value) {
+  if (!value) return "从未在线";
+  const seconds = Math.max(0, Math.round(Date.now() / 1000 - value));
+  if (seconds < 60) return "刚刚在线";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return new Date(value * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 async function fetchWithTimeout(url, options, timeout = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -162,29 +181,52 @@ function queueMove(dx, dy) {
 function renderDevices() {
   userLabel.textContent = username;
   if (!devices.length) {
-    deviceList.innerHTML = `<div class="device-card"><div><div class="device-name">暂无电脑在线</div><p>请先启动电脑端 Agent</p></div><span class="status-pill offline">离线</span></div>`;
+    deviceList.innerHTML = `<div class="device-card empty-card"><div><div class="device-name">暂无设备</div><p>请先启动电脑端 Agent，登录后会自动出现在这里</p></div><span class="status-pill offline">离线</span></div>`;
     return;
   }
   deviceList.innerHTML = "";
   devices.forEach((device) => {
-    const button = document.createElement("button");
-    button.className = "device-card";
-    button.type = "button";
-    button.disabled = !device.online;
-    button.innerHTML = `
-      <div>
-        <div class="device-name">${device.name}</div>
-        <p>${device.id}</p>
+    const card = document.createElement("div");
+    card.className = "device-card";
+    card.innerHTML = `
+      <div class="device-info">
+        <div class="device-name">${escapeHtml(device.name)}</div>
+        <p class="device-id">${escapeHtml(device.id)}</p>
+        <p>最后在线：${formatLastSeen(device.lastSeen)}</p>
       </div>
-      <span class="status-pill ${device.online ? "" : "offline"}">${device.online ? "在线" : "离线"}</span>
+      <div class="device-actions">
+        <span class="status-pill ${device.online ? "" : "offline"}">${device.online ? "在线" : "离线"}</span>
+        <button class="secondary-button connect-device" type="button" ${device.online ? "" : "disabled"}>连接</button>
+        <button class="ghost-button delete-device" type="button" ${device.online ? "disabled" : ""}>删除</button>
+      </div>
     `;
-    button.addEventListener("click", () => {
+    card.querySelector(".connect-device").addEventListener("click", () => {
       selectedDevice = device;
       deviceStatus.textContent = `${device.name} 在线`;
       show(controlView);
     });
-    deviceList.appendChild(button);
+    card.querySelector(".delete-device").addEventListener("click", async () => {
+      await deleteDevice(device.id);
+    });
+    deviceList.appendChild(card);
   });
+}
+
+async function deleteDevice(deviceId) {
+  const response = await fetchWithTimeout(appUrl(`/api/devices?token=${encodeURIComponent(token)}&id=${encodeURIComponent(deviceId)}`), {
+    method: "DELETE",
+  });
+  if (response.status === 409) {
+    alert("在线设备不能删除，请先让电脑端下线");
+    return;
+  }
+  if (!response.ok) {
+    alert("删除失败，请刷新后重试");
+    return;
+  }
+  const result = await response.json();
+  devices = result.devices;
+  renderDevices();
 }
 
 function connectWs() {
@@ -226,7 +268,11 @@ async function login(usernameValue, passwordValue) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: usernameValue, password: passwordValue }),
   });
-  if (response.status === 429) throw new Error("登录尝试过多，请稍后再试");
+  if (response.status === 429) {
+    const data = await response.json().catch(() => ({}));
+    const minutes = Math.max(1, Math.ceil((data.retryAfter || 60) / 60));
+    throw new Error(`登录尝试过多，账号已锁定约 ${minutes} 分钟`);
+  }
   if (!response.ok) throw new Error("账号或密码错误");
   return response.json();
 }

@@ -24,6 +24,7 @@ PUBLIC_WS = os.environ.get("CS_PUBLIC_WS", str(WS_PORT))
 SESSION_TIMEOUT = int(os.environ.get("CS_SESSION_TIMEOUT", str(7 * 24 * 3600)))
 LOGIN_RATE_LIMIT = int(os.environ.get("CS_LOGIN_RATE_LIMIT", "5"))
 LOGIN_RATE_WINDOW = int(os.environ.get("CS_LOGIN_RATE_WINDOW", "300"))
+LOGIN_LOCK_SECONDS = int(os.environ.get("CS_LOGIN_LOCK_SECONDS", "900"))
 DEVICE_TIMEOUT = int(os.environ.get("CS_DEVICE_TIMEOUT", "60"))
 START_TIME = time.time()
 
@@ -37,6 +38,7 @@ sessions = {}
 devices = {}
 mobile_clients = {}
 login_attempts = {}
+login_lockouts = {}
 state_lock = threading.Lock()
 
 
@@ -116,6 +118,21 @@ def cleanup_login_attempts(now=None):
             login_attempts[ip] = kept
         else:
             del login_attempts[ip]
+    for key, locked_until in list(login_lockouts.items()):
+        if locked_until <= now:
+            del login_lockouts[key]
+
+
+def login_key(username, ip):
+    return f"{username.lower()}|{ip}"
+
+
+def login_lock_remaining(username, ip):
+    now = time.time()
+    with state_lock:
+        cleanup_login_attempts(now)
+        locked_until = login_lockouts.get(login_key(username, ip), 0)
+        return max(0, int(locked_until - now))
 
 
 def check_login_rate_limit(ip):
@@ -129,6 +146,25 @@ def record_login_failure(ip):
     with state_lock:
         cleanup_login_attempts()
         login_attempts.setdefault(ip, []).append(time.time())
+
+
+def record_account_login_failure(username, ip):
+    now = time.time()
+    key = login_key(username, ip)
+    with state_lock:
+        cleanup_login_attempts(now)
+        attempts = login_attempts.setdefault(key, [])
+        attempts.append(now)
+        if len(attempts) >= LOGIN_RATE_LIMIT:
+            login_lockouts[key] = now + LOGIN_LOCK_SECONDS
+            login_attempts[key] = []
+
+
+def clear_account_login_failures(username, ip):
+    key = login_key(username, ip)
+    with state_lock:
+        login_attempts.pop(key, None)
+        login_lockouts.pop(key, None)
 
 
 def cleanup_sessions(now=None):
@@ -259,10 +295,16 @@ class Handler(SimpleHTTPRequestHandler):
             logger.warning("Login rate limited for %s", ip)
             json_response(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate_limited"})
             return
+        locked_for = login_lock_remaining(username, ip)
+        if locked_for > 0:
+            logger.warning("Login locked for %s from %s", username, ip)
+            json_response(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "account_locked", "retryAfter": locked_for})
+            return
 
         stored = USERS.get(username)
         if not stored or not verify_password(password, stored):
             record_login_failure(ip)
+            record_account_login_failure(username, ip)
             logger.warning("Failed login for user %s from %s", username, ip)
             json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_credentials"})
             return
@@ -270,6 +312,7 @@ class Handler(SimpleHTTPRequestHandler):
         token = secrets.token_urlsafe(32)
         with state_lock:
             sessions[token] = {"username": username, "last_seen": time.time()}
+        clear_account_login_failures(username, ip)
         json_response(self, HTTPStatus.OK, {"token": token, "username": username})
 
     def do_GET(self):
@@ -307,6 +350,35 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         super().do_GET()
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/devices":
+            json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+
+        query = parse_qs(parsed.query)
+        token = query.get("token", [""])[0]
+        device_id = query.get("id", [""])[0]
+        username = validate_token(token)
+        if not username:
+            json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_token"})
+            return
+        if not device_id:
+            json_response(self, HTTPStatus.BAD_REQUEST, {"error": "missing_device"})
+            return
+
+        with state_lock:
+            device = devices.get(device_id)
+            if not device or device["username"] != username:
+                json_response(self, HTTPStatus.NOT_FOUND, {"error": "device_not_found"})
+                return
+            if device["online"]:
+                json_response(self, HTTPStatus.CONFLICT, {"error": "device_online"})
+                return
+            del devices[device_id]
+
+        json_response(self, HTTPStatus.OK, {"devices": user_devices(username)})
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
