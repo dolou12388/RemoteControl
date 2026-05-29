@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#f6f8fb" />
     <title>云端手机鼠标</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -70,16 +72,47 @@
                 <button class="control-button zoom-button" type="button" data-zoom="-1" aria-label="缩小">-</button>
                 <button class="control-button zoom-button" type="button" data-zoom="1" aria-label="放大">+</button>
               </div>
+              <button id="shortcutToggleButton" class="control-button settings-button" type="button" aria-expanded="false" aria-controls="shortcutControls">快捷</button>
+              <button id="settingsButton" class="control-button settings-button" type="button" aria-label="设置">设置</button>
             </div>
-            <div id="shortcutControls" class="control-row" role="group" aria-label="常用快捷键">
-              <button class="shortcut-button" type="button" data-hotkey="copy" aria-label="复制">复制</button>
-              <button class="shortcut-button" type="button" data-hotkey="paste" aria-label="粘贴">粘贴</button>
-              <button class="shortcut-button" type="button" data-hotkey="undo" aria-label="撤销">撤销</button>
-              <button class="shortcut-button" type="button" data-hotkey="save" aria-label="保存">保存</button>
-              <button class="shortcut-button" type="button" data-key="enter" aria-label="回车">回车</button>
-              <button class="shortcut-button" type="button" data-key="escape" aria-label="Esc">Esc</button>
+            <div id="shortcutControls" class="control-row collapsed" role="group" aria-label="常用快捷键">
             </div>
           </div>
+          <section id="settingsPanel" class="settings-panel hidden" aria-label="控制设置">
+            <div class="settings-head">
+              <h3>控制设置</h3>
+              <button id="closeSettingsButton" class="ghost-button" type="button">关闭</button>
+            </div>
+            <label>
+              <span>鼠标灵敏度 <output id="moveSensitivityValue"></output></span>
+              <input id="moveSensitivityInput" type="range" min="0.6" max="3" step="0.05" />
+            </label>
+            <label>
+              <span>滚动速度 <output id="scrollSensitivityValue"></output></span>
+              <input id="scrollSensitivityInput" type="range" min="0.6" max="4" step="0.05" />
+            </label>
+            <label>
+              <span>边缘移动速度 <output id="edgePanSpeedValue"></output></span>
+              <input id="edgePanSpeedInput" type="range" min="4" max="40" step="1" />
+            </label>
+            <label>
+              <span>长按拖动时间 <output id="longPressMsValue"></output></span>
+              <input id="longPressMsInput" type="range" min="320" max="900" step="20" />
+            </label>
+            <label class="check-row">
+              <input id="longPressEnabledInput" type="checkbox" />
+              <span>启用长按拖动</span>
+            </label>
+            <label class="check-row">
+              <input id="darkModeInput" type="checkbox" />
+              <span>深色模式</span>
+            </label>
+            <div>
+              <h3>快捷按钮</h3>
+              <div id="shortcutSettings" class="shortcut-settings"></div>
+            </div>
+            <p id="connectionMeta" class="settings-meta"></p>
+          </section>
           <form id="remoteInputPanel" class="remote-input-panel hidden" autocomplete="off">
             <input id="remoteInput" type="text" enterkeyhint="send" placeholder="在电脑输入框中输入文字" />
             <button class="primary-button" type="submit">发送</button>

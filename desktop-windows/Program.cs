@@ -32,6 +32,7 @@ namespace ControlMouseCSharp
     internal sealed class MainForm : Form
     {
         private const string DefaultServer = "https://your-domain.example";
+        private const string AppVersion = "0.2.0";
 
         private readonly TextBox serverBox = new TextBox();
         private readonly TextBox usernameBox = new TextBox();
@@ -39,6 +40,7 @@ namespace ControlMouseCSharp
         private readonly TextBox deviceNameBox = new TextBox();
         private readonly TextBox pairingCodeBox = new TextBox();
         private readonly Label statusLabel = new Label();
+        private readonly Label detailLabel = new Label();
         private readonly Button loginButton = new Button();
         private readonly Button pairingLoginButton = new Button();
         private readonly Button registerButton = new Button();
@@ -89,7 +91,7 @@ namespace ControlMouseCSharp
         {
             var title = new Label
             {
-                Text = "电脑端控制服务",
+                Text = "电脑端控制服务 v" + AppVersion,
                 AutoSize = true,
                 Font = new Font(Font.FontFamily, 18F, FontStyle.Bold),
                 Location = new Point(28, 24)
@@ -144,6 +146,13 @@ namespace ControlMouseCSharp
             statusLabel.Location = new Point(28, 510);
             statusLabel.Size = new Size(465, 34);
             Controls.Add(statusLabel);
+
+            detailLabel.Text = "服务器：未配置";
+            detailLabel.AutoEllipsis = true;
+            detailLabel.Location = new Point(28, 540);
+            detailLabel.Size = new Size(465, 28);
+            detailLabel.ForeColor = Color.FromArgb(96, 109, 128);
+            Controls.Add(detailLabel);
         }
 
         private void BuildTrayIcon()
@@ -316,6 +325,7 @@ namespace ControlMouseCSharp
                         SetStatus("正在连接：" + url.Host);
                         await socket.ConnectAsync(url, cancel);
                         SetStatus("已上线：" + deviceName);
+                        SetDetail("服务器：" + url.Host + "  账号：" + usernameBox.Text.Trim() + "  设备：" + GetDeviceId());
 
                         using (var linkedCancel = CancellationTokenSource.CreateLinkedTokenSource(cancel))
                         {
@@ -642,6 +652,7 @@ namespace ControlMouseCSharp
             token = null;
             offlineButton.Enabled = false;
             SetStatus("状态：未上线");
+            SetDetail("服务器：" + serverBox.Text.Trim() + "  账号：" + usernameBox.Text.Trim() + "  自动上线：" + (autoOnlineBox.Checked ? "开" : "关"));
         }
 
         private void SetBusy(bool busy, string message)
@@ -669,6 +680,16 @@ namespace ControlMouseCSharp
                 return;
             }
             statusLabel.Text = text.StartsWith("状态：") ? text : "状态：" + text;
+        }
+
+        private void SetDetail(string text)
+        {
+            if (detailLabel.InvokeRequired)
+            {
+                BeginInvoke(new Action<string>(SetDetail), text);
+                return;
+            }
+            detailLabel.Text = text;
         }
 
         private static string CleanError(string message)
@@ -736,9 +757,16 @@ namespace ControlMouseCSharp
         private const ushort VK_CONTROL = 0x11;
         private const ushort VK_RETURN = 0x0D;
         private const ushort VK_ESCAPE = 0x1B;
+        private const ushort VK_TAB = 0x09;
+        private const ushort VK_SHIFT = 0x10;
+        private const ushort VK_MENU = 0x12;
+        private const ushort VK_LWIN = 0x5B;
+        private const ushort VK_SNAPSHOT = 0x2C;
         private const ushort VK_ADD = 0x6B;
         private const ushort VK_SUBTRACT = 0x6D;
         private const ushort VK_C = 0x43;
+        private const ushort VK_D = 0x44;
+        private const ushort VK_L = 0x4C;
         private const ushort VK_S = 0x53;
         private const ushort VK_V = 0x56;
         private const ushort VK_Z = 0x5A;
@@ -892,6 +920,26 @@ namespace ControlMouseCSharp
             {
                 Hotkey(VK_CONTROL, VK_S);
             }
+            else if (name == "altTab")
+            {
+                Hotkey(VK_MENU, VK_TAB);
+            }
+            else if (name == "showDesktop")
+            {
+                Hotkey(VK_LWIN, VK_D);
+            }
+            else if (name == "screenshot")
+            {
+                Hotkey(VK_LWIN, VK_SHIFT, VK_S);
+            }
+            else if (name == "lock")
+            {
+                Hotkey(VK_LWIN, VK_L);
+            }
+            else if (name == "taskManager")
+            {
+                Hotkey(VK_CONTROL, VK_SHIFT, VK_ESCAPE);
+            }
         }
 
         private static void SendKey(string name)
@@ -909,6 +957,11 @@ namespace ControlMouseCSharp
         private static void Hotkey(ushort modifier, ushort key)
         {
             SendInput(4, new[] { KeyInput(modifier, false), KeyInput(key, false), KeyInput(key, true), KeyInput(modifier, true) }, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        private static void Hotkey(ushort modifier1, ushort modifier2, ushort key)
+        {
+            SendInput(6, new[] { KeyInput(modifier1, false), KeyInput(modifier2, false), KeyInput(key, false), KeyInput(key, true), KeyInput(modifier2, true), KeyInput(modifier1, true) }, Marshal.SizeOf(typeof(INPUT)));
         }
 
         private static void Key(ushort key)

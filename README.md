@@ -23,15 +23,18 @@
 - 手机网页端支持注册 / 登录
 - 默认关闭公开注册，可开启公开注册或使用邀请码注册
 - 手机端显示当前账号下的在线电脑
-- 手机端设备管理页支持查看最后在线时间、连接在线设备、删除离线设备
+- 手机端设备管理页支持查看最后在线时间、连接在线设备、重命名设备、删除离线设备
 - 手机端可生成一次性配对码，Windows 电脑端无需输入账号密码即可配对上线
 - 电脑输入框获得焦点时，手机端显示远程输入栏
 - 远程输入栏出现时不会自动唤醒手机输入法，需要输入时手动点输入框
 - 触控点滑到手机屏幕边缘时会持续向对应方向移动鼠标
+- 手机端支持鼠标灵敏度、滚动速度、边缘移动速度、长按拖动时间和长按开关设置
+- 底部快捷按钮可折叠，并可自定义显示复制、粘贴、切换窗口、显示桌面、截图、锁屏等快捷指令
+- 手机端支持深色模式、PWA 添加到桌面、连接延迟显示和服务端版本显示
 - Linux 服务器一键部署，支持 systemd 和 Nginx 反向代理
 - 内置会话过期、登录限流和锁定、消息验证、设备超时和健康检查
 - 设备信息持久化保存，服务重启后仍可查看历史离线设备
-- Windows 电脑端支持托盘图标、最小化到托盘、保存配置、自动上线和当前用户开机自启
+- Windows 电脑端支持托盘图标、最小化到托盘、保存配置、自动上线、状态详情和当前用户开机自启
 - GitHub Actions 自动构建 Windows exe，推送 `v*` 标签时自动上传 Release 附件
 
 ## 架构说明
@@ -271,14 +274,18 @@ Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scro
 - Public registration is disabled by default; enable it explicitly or use invite-code registration
 - Online desktop list on the phone
 - Device management page with last-seen time, connect action, and offline-device deletion
+- Device cards can be renamed from the phone UI
 - One-time pairing codes let the Windows desktop client come online without typing the account password
 - Remote text input: when a text field is focused on the PC, the phone shows an input bar
 - The remote input bar does not auto-focus, so the phone keyboard opens only when the user taps it
 - Edge panning keeps the mouse moving when the touch point reaches the phone screen edge
+- Mobile control settings include mouse sensitivity, scroll speed, edge-pan speed, long-press timing, and a long-press drag toggle
+- Shortcut buttons are collapsible and customizable, including copy, paste, window switching, show desktop, screenshots, lock screen, and more
+- Mobile web supports dark mode, PWA install, connection latency display, and server version display
 - One-command Linux deployment with systemd and optional Nginx reverse proxy
 - Built-in session expiry, login rate limiting and lockout, message validation, device timeout, and health check
 - Device metadata is persisted so offline device history survives server restarts
-- Windows desktop client supports a tray icon, minimize-to-tray, saved settings, auto-online, and per-user auto-start
+- Windows desktop client supports a tray icon, minimize-to-tray, saved settings, auto-online, status details, and per-user auto-start
 - GitHub Actions builds the Windows exe automatically and uploads it to tagged `v*` releases
 
 ## Architecture

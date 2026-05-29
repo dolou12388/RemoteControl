@@ -20,17 +20,34 @@ const cursor = document.querySelector("#cursor");
 const controls = document.querySelector("#controls");
 const buttonOptions = document.querySelectorAll(".button-option");
 const zoomButtons = document.querySelectorAll(".zoom-button");
-const shortcutButtons = document.querySelectorAll(".shortcut-button");
+const shortcutControls = document.querySelector("#shortcutControls");
+const shortcutToggleButton = document.querySelector("#shortcutToggleButton");
+const settingsButton = document.querySelector("#settingsButton");
+const settingsPanel = document.querySelector("#settingsPanel");
+const closeSettingsButton = document.querySelector("#closeSettingsButton");
+const moveSensitivityInput = document.querySelector("#moveSensitivityInput");
+const scrollSensitivityInput = document.querySelector("#scrollSensitivityInput");
+const edgePanSpeedInput = document.querySelector("#edgePanSpeedInput");
+const longPressMsInput = document.querySelector("#longPressMsInput");
+const longPressEnabledInput = document.querySelector("#longPressEnabledInput");
+const darkModeInput = document.querySelector("#darkModeInput");
+const moveSensitivityValue = document.querySelector("#moveSensitivityValue");
+const scrollSensitivityValue = document.querySelector("#scrollSensitivityValue");
+const edgePanSpeedValue = document.querySelector("#edgePanSpeedValue");
+const longPressMsValue = document.querySelector("#longPressMsValue");
+const shortcutSettings = document.querySelector("#shortcutSettings");
+const connectionMeta = document.querySelector("#connectionMeta");
 const remoteInputPanel = document.querySelector("#remoteInputPanel");
 const remoteInput = document.querySelector("#remoteInput");
 
+const APP_SETTINGS_KEY = "csControlSettings";
 const TAP_MAX_MS = 260;
 const TAP_MAX_DISTANCE = 12;
 const DOUBLE_TAP_MS = 320;
-const LONG_PRESS_MS = 560;
-const MOVE_SENSITIVITY = 1.55;
+const DEFAULT_LONG_PRESS_MS = 560;
+const DEFAULT_MOVE_SENSITIVITY = 1.55;
 const MIN_MOVE_DELTA = 0.12;
-const SCROLL_SENSITIVITY = 1.8;
+const DEFAULT_SCROLL_SENSITIVITY = 1.8;
 const ZOOM_WHEEL_DELTA = 140;
 const ZOOM_REPEAT_MS = 110;
 const BLOCKED_TOUCH_EVENTS = ["touchstart", "touchmove", "gesturestart", "gesturechange"];
@@ -38,8 +55,23 @@ const FETCH_TIMEOUT_MS = 10000;
 const RECONNECT_MIN_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
 const EDGE_PAN_SIZE = 34;
-const EDGE_PAN_MAX_SPEED = 22;
+const DEFAULT_EDGE_PAN_MAX_SPEED = 22;
 const EDGE_PAN_INTERVAL_MS = 40;
+const PING_INTERVAL_MS = 10000;
+const SHORTCUT_DEFINITIONS = [
+  { id: "copy", label: "复制", command: { type: "hotkey", name: "copy" } },
+  { id: "paste", label: "粘贴", command: { type: "hotkey", name: "paste" } },
+  { id: "undo", label: "撤销", command: { type: "hotkey", name: "undo" } },
+  { id: "save", label: "保存", command: { type: "hotkey", name: "save" } },
+  { id: "enter", label: "回车", command: { type: "key", name: "enter" } },
+  { id: "escape", label: "Esc", command: { type: "key", name: "escape" } },
+  { id: "altTab", label: "切换", command: { type: "hotkey", name: "altTab" } },
+  { id: "showDesktop", label: "桌面", command: { type: "hotkey", name: "showDesktop" } },
+  { id: "screenshot", label: "截图", command: { type: "hotkey", name: "screenshot" } },
+  { id: "lock", label: "锁屏", command: { type: "hotkey", name: "lock" } },
+  { id: "taskManager", label: "任务", command: { type: "hotkey", name: "taskManager" } },
+];
+const DEFAULT_SHORTCUTS = ["copy", "paste", "undo", "save", "enter", "escape"];
 
 let token = localStorage.getItem("csToken") || "";
 let username = localStorage.getItem("csUsername") || "";
@@ -73,8 +105,12 @@ let pairingTimer = null;
 let edgePanTimer = null;
 let edgePanX = 0;
 let edgePanY = 0;
+let pingTimer = null;
+let latencyMs = null;
+let shortcutsExpanded = false;
 
 const config = window.CS_CONFIG || {};
+const settings = loadSettings();
 
 function basePath() {
   const path = location.pathname;
@@ -117,6 +153,38 @@ function midpoint(points) {
 function sendCommand(command) {
   if (!selectedDevice || !ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "command", deviceId: selectedDevice.id, command }));
+}
+
+function loadSettings() {
+  const fallback = {
+    moveSensitivity: DEFAULT_MOVE_SENSITIVITY,
+    scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
+    edgePanSpeed: DEFAULT_EDGE_PAN_MAX_SPEED,
+    longPressMs: DEFAULT_LONG_PRESS_MS,
+    longPressEnabled: true,
+    darkMode: false,
+    shortcuts: DEFAULT_SHORTCUTS,
+  };
+  try {
+    const saved = { ...fallback, ...JSON.parse(localStorage.getItem(APP_SETTINGS_KEY) || "{}") };
+    saved.shortcuts = Array.isArray(saved.shortcuts) ? saved.shortcuts : DEFAULT_SHORTCUTS;
+    return saved;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSettings() {
+  localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function applyTheme() {
+  document.documentElement.classList.toggle("dark", Boolean(settings.darkMode));
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", settings.darkMode ? "#10151f" : "#f6f8fb");
+}
+
+function shortcutDefinition(id) {
+  return SHORTCUT_DEFINITIONS.find((item) => item.id === id);
 }
 
 function escapeHtml(value) {
@@ -168,8 +236,10 @@ function applyRegistrationConfig() {
 }
 
 function setConnectionState(text, isWeak = false) {
+  renderConnectionMeta();
   if (!selectedDevice || controlView.classList.contains("hidden")) return;
-  deviceStatus.textContent = text;
+  const suffix = latencyMs == null ? "" : ` · ${latencyMs}ms`;
+  deviceStatus.textContent = `${text}${suffix}`;
   deviceStatus.style.opacity = isWeak ? "0.62" : "1";
 }
 
@@ -202,12 +272,18 @@ function queueMove(dx, dy) {
   }
 }
 
+function renderConnectionMeta() {
+  const version = config.version ? `v${config.version}` : "未知版本";
+  const latency = latencyMs == null ? "延迟：--" : `延迟：${latencyMs}ms`;
+  connectionMeta.textContent = `${latency} · ${version}`;
+}
+
 function edgeVelocity(value, max) {
   if (value <= EDGE_PAN_SIZE) {
-    return -Math.min(1, (EDGE_PAN_SIZE - value) / EDGE_PAN_SIZE) * EDGE_PAN_MAX_SPEED;
+    return -Math.min(1, (EDGE_PAN_SIZE - value) / EDGE_PAN_SIZE) * settings.edgePanSpeed;
   }
   if (value >= max - EDGE_PAN_SIZE) {
-    return Math.min(1, (value - (max - EDGE_PAN_SIZE)) / EDGE_PAN_SIZE) * EDGE_PAN_MAX_SPEED;
+    return Math.min(1, (value - (max - EDGE_PAN_SIZE)) / EDGE_PAN_SIZE) * settings.edgePanSpeed;
   }
   return 0;
 }
@@ -239,6 +315,69 @@ function stopEdgePan() {
   edgePanY = 0;
 }
 
+function renderShortcuts() {
+  shortcutControls.innerHTML = "";
+  settings.shortcuts.map(shortcutDefinition).filter(Boolean).forEach((shortcut) => {
+    const button = document.createElement("button");
+    button.className = "shortcut-button";
+    button.type = "button";
+    button.textContent = shortcut.label;
+    button.setAttribute("aria-label", shortcut.label);
+    button.addEventListener("pointerup", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sendCommand(shortcut.command);
+    });
+    shortcutControls.appendChild(button);
+  });
+  shortcutControls.classList.toggle("collapsed", !shortcutsExpanded);
+  shortcutToggleButton.setAttribute("aria-expanded", String(shortcutsExpanded));
+}
+
+function renderShortcutSettings() {
+  shortcutSettings.innerHTML = "";
+  SHORTCUT_DEFINITIONS.forEach((shortcut) => {
+    const label = document.createElement("label");
+    label.className = "check-row";
+    label.innerHTML = `<input type="checkbox" value="${shortcut.id}" /><span>${shortcut.label}</span>`;
+    const input = label.querySelector("input");
+    input.checked = settings.shortcuts.includes(shortcut.id);
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        settings.shortcuts = [...new Set([...settings.shortcuts, shortcut.id])];
+      } else {
+        settings.shortcuts = settings.shortcuts.filter((id) => id !== shortcut.id);
+      }
+      saveSettings();
+      renderShortcuts();
+    });
+    shortcutSettings.appendChild(label);
+  });
+}
+
+function syncSettingsControls() {
+  moveSensitivityInput.value = settings.moveSensitivity;
+  scrollSensitivityInput.value = settings.scrollSensitivity;
+  edgePanSpeedInput.value = settings.edgePanSpeed;
+  longPressMsInput.value = settings.longPressMs;
+  longPressEnabledInput.checked = settings.longPressEnabled;
+  darkModeInput.checked = settings.darkMode;
+  moveSensitivityValue.textContent = Number(settings.moveSensitivity).toFixed(2);
+  scrollSensitivityValue.textContent = Number(settings.scrollSensitivity).toFixed(2);
+  edgePanSpeedValue.textContent = `${settings.edgePanSpeed}`;
+  longPressMsValue.textContent = `${settings.longPressMs}ms`;
+  renderShortcutSettings();
+  renderConnectionMeta();
+}
+
+function bindSettingInput(input, key, output, format = (value) => value) {
+  input.addEventListener("input", () => {
+    settings[key] = Number(input.value);
+    output.textContent = format(settings[key]);
+    saveSettings();
+  });
+}
+
 function renderDevices() {
   userLabel.textContent = username;
   if (!devices.length) {
@@ -258,6 +397,7 @@ function renderDevices() {
       <div class="device-actions">
         <span class="status-pill ${device.online ? "" : "offline"}">${device.online ? "在线" : "离线"}</span>
         <button class="secondary-button connect-device" type="button" ${device.online ? "" : "disabled"}>连接</button>
+        <button class="ghost-button rename-device" type="button">改名</button>
         <button class="ghost-button delete-device" type="button" ${device.online ? "disabled" : ""}>删除</button>
       </div>
     `;
@@ -268,6 +408,9 @@ function renderDevices() {
     });
     card.querySelector(".delete-device").addEventListener("click", async () => {
       await deleteDevice(device.id);
+    });
+    card.querySelector(".rename-device").addEventListener("click", async () => {
+      await renameDevice(device);
     });
     deviceList.appendChild(card);
   });
@@ -288,6 +431,26 @@ async function deleteDevice(deviceId) {
   }
   const result = await response.json();
   devices = result.devices;
+  renderDevices();
+}
+
+async function renameDevice(device) {
+  const nextName = prompt("输入新的设备名称", device.name);
+  if (!nextName || nextName.trim() === device.name) return;
+  const response = await fetchWithTimeout(appUrl("/api/devices"), {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id: device.id, name: nextName.trim() }),
+  });
+  if (!response.ok) {
+    alert("重命名失败，请稍后重试");
+    return;
+  }
+  const result = await response.json();
+  devices = result.devices;
+  if (selectedDevice) {
+    selectedDevice = devices.find((item) => item.id === selectedDevice.id) || selectedDevice;
+  }
   renderDevices();
 }
 
@@ -318,10 +481,13 @@ async function generatePairingCode() {
 function connectWs() {
   if (!token) return;
   clearTimeout(reconnectTimer);
+  clearInterval(pingTimer);
   ws = new WebSocket(wsUrl());
   ws.addEventListener("open", () => {
     reconnectDelay = RECONNECT_MIN_DELAY;
     setConnectionState(selectedDevice ? `${selectedDevice.name} 在线` : "已连接");
+    sendPing();
+    pingTimer = setInterval(sendPing, PING_INTERVAL_MS);
   });
   ws.addEventListener("message", (event) => {
     const data = JSON.parse(event.data);
@@ -339,13 +505,23 @@ function connectWs() {
       } else {
         hideRemoteInput();
       }
+    } else if (data.type === "pong" && data.sentAt) {
+      latencyMs = Math.max(0, Math.round(performance.now() - data.sentAt));
+      setConnectionState(selectedDevice && selectedDevice.online ? `${selectedDevice.name} 在线` : "已连接");
     }
   });
   ws.addEventListener("close", () => {
+    clearInterval(pingTimer);
+    latencyMs = null;
     setConnectionState("网络已断开，正在重连...", true);
     reconnectTimer = setTimeout(connectWs, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
   });
+}
+
+function sendPing() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "ping", sentAt: performance.now() }));
 }
 
 async function login(usernameValue, passwordValue) {
@@ -383,6 +559,7 @@ function logout() {
   localStorage.removeItem("csToken");
   localStorage.removeItem("csUsername");
   clearTimeout(reconnectTimer);
+  clearInterval(pingTimer);
   if (ws) ws.close();
   show(loginView);
 }
@@ -484,8 +661,33 @@ registerButton.addEventListener("click", async () => {
 logoutButton.addEventListener("click", logout);
 pairingButton.addEventListener("click", generatePairingCode);
 backButton.addEventListener("click", () => show(devicesView));
+shortcutToggleButton.addEventListener("click", () => {
+  shortcutsExpanded = !shortcutsExpanded;
+  renderShortcuts();
+});
+settingsButton.addEventListener("click", () => {
+  settingsPanel.classList.remove("hidden");
+  syncSettingsControls();
+});
+closeSettingsButton.addEventListener("click", () => {
+  settingsPanel.classList.add("hidden");
+});
+bindSettingInput(moveSensitivityInput, "moveSensitivity", moveSensitivityValue, (value) => Number(value).toFixed(2));
+bindSettingInput(scrollSensitivityInput, "scrollSensitivity", scrollSensitivityValue, (value) => Number(value).toFixed(2));
+bindSettingInput(edgePanSpeedInput, "edgePanSpeed", edgePanSpeedValue);
+bindSettingInput(longPressMsInput, "longPressMs", longPressMsValue, (value) => `${value}ms`);
+longPressEnabledInput.addEventListener("change", () => {
+  settings.longPressEnabled = longPressEnabledInput.checked;
+  saveSettings();
+});
+darkModeInput.addEventListener("change", () => {
+  settings.darkMode = darkModeInput.checked;
+  saveSettings();
+  applyTheme();
+});
 
 controls.addEventListener("pointerdown", (event) => event.stopPropagation());
+settingsPanel.addEventListener("pointerdown", (event) => event.stopPropagation());
 remoteInputPanel.addEventListener("pointerdown", (event) => event.stopPropagation());
 remoteInputPanel.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -515,18 +717,6 @@ zoomButtons.forEach((button) => {
   button.addEventListener("pointerleave", stopZoomRepeat);
 });
 
-shortcutButtons.forEach((button) => {
-  button.addEventListener("pointerup", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (button.dataset.hotkey) {
-      sendCommand({ type: "hotkey", name: button.dataset.hotkey });
-    } else if (button.dataset.key) {
-      sendCommand({ type: "key", name: button.dataset.key });
-    }
-  });
-});
-
 pad.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   pad.setPointerCapture(event.pointerId);
@@ -546,14 +736,16 @@ pad.addEventListener("pointerdown", (event) => {
     longPressActive = false;
     longPressButton = selectedButton;
     clearLongPressTimer();
-    longPressTimer = setTimeout(() => {
-      if (activePointers.size !== 1 || primaryPointerId !== event.pointerId) return;
-      if (movedDistance > TAP_MAX_DISTANCE) return;
-      clearTapTimer();
-      lastTap = null;
-      longPressActive = true;
-      sendCommand({ type: "mouseDown", button: longPressButton });
-    }, LONG_PRESS_MS);
+    if (settings.longPressEnabled) {
+      longPressTimer = setTimeout(() => {
+        if (activePointers.size !== 1 || primaryPointerId !== event.pointerId) return;
+        if (movedDistance > TAP_MAX_DISTANCE) return;
+        clearTapTimer();
+        lastTap = null;
+        longPressActive = true;
+        sendCommand({ type: "mouseDown", button: longPressButton });
+      }, settings.longPressMs);
+    }
     setCursorPosition(event.clientX, event.clientY);
     updateEdgePan({ x: event.clientX, y: event.clientY });
   } else if (activePointers.size === 2) {
@@ -582,7 +774,7 @@ pad.addEventListener("pointermove", (event) => {
     scrollRemainder += center.y - lastTwoFingerCenter.y;
     if (Math.abs(scrollRemainder) >= 1.5) {
       didTwoFingerGesture = true;
-      sendCommand({ type: "scroll", delta: -scrollRemainder * SCROLL_SENSITIVITY });
+      sendCommand({ type: "scroll", delta: -scrollRemainder * settings.scrollSensitivity });
       scrollRemainder = 0;
     }
     lastTwoFingerCenter = center;
@@ -605,7 +797,7 @@ pad.addEventListener("pointermove", (event) => {
 
   if (!longPressActive && movedDistance > TAP_MAX_DISTANCE) clearLongPressTimer();
   setCursorPosition(latestEvent.clientX, latestEvent.clientY);
-  queueMove(totalDx * MOVE_SENSITIVITY, totalDy * MOVE_SENSITIVITY);
+  queueMove(totalDx * settings.moveSensitivity, totalDy * settings.moveSensitivity);
   updateEdgePan({ x: latestEvent.clientX, y: latestEvent.clientY });
 });
 
@@ -669,3 +861,10 @@ if (token && username) {
 }
 
 applyRegistrationConfig();
+applyTheme();
+renderShortcuts();
+syncSettingsControls();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register(appUrl("/service-worker.js")).catch(() => {});
+}

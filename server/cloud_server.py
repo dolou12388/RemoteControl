@@ -19,6 +19,7 @@ WEB_DIR = ROOT / "cs_web"
 DATA_DIR = ROOT / "data"
 USERS_FILE = DATA_DIR / "users.json"
 DEVICES_FILE = DATA_DIR / "devices.json"
+APP_VERSION = "0.2.0"
 HTTP_PORT = int(os.environ.get("CS_HTTP_PORT", "8000"))
 WS_PORT = int(os.environ.get("CS_WS_PORT", "8765"))
 PUBLIC_WS = os.environ.get("CS_PUBLIC_WS", str(WS_PORT))
@@ -340,6 +341,8 @@ def validate_desktop_message(data):
 def validate_mobile_message(data):
     if not isinstance(data, dict):
         return False, "invalid_format"
+    if data.get("type") == "ping":
+        return True, None
     if data.get("type") != "command":
         return False, "unknown_type"
     if not isinstance(data.get("deviceId"), str) or not data["deviceId"]:
@@ -469,6 +472,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/config.js":
             config = {
+                "version": APP_VERSION,
                 "wsPort": PUBLIC_WS,
                 "allowPublicRegistration": ALLOW_PUBLIC_REGISTRATION,
                 "registrationInviteRequired": bool(REGISTRATION_INVITE) and not ALLOW_PUBLIC_REGISTRATION,
@@ -485,6 +489,40 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         super().do_GET()
+
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/devices":
+            json_response(self, HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+
+        try:
+            data = read_json(self)
+        except Exception:
+            json_response(self, HTTPStatus.BAD_REQUEST, {"error": "bad_json"})
+            return
+
+        token = request_token(self, parsed=parsed, data=data)
+        username = validate_token(token)
+        if not username:
+            json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "invalid_token"})
+            return
+
+        device_id = str(data.get("id", "")).strip()
+        device_name = str(data.get("name", "")).strip()
+        if not device_id or not device_name or len(device_name) > 60:
+            json_response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid_device"})
+            return
+
+        with state_lock:
+            device = devices.get(device_id)
+            if not device or device["username"] != username:
+                json_response(self, HTTPStatus.NOT_FOUND, {"error": "device_not_found"})
+                return
+            device["name"] = device_name
+            save_devices()
+
+        json_response(self, HTTPStatus.OK, {"devices": user_devices(username)})
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
@@ -598,6 +636,9 @@ async def websocket_handler(websocket):
                 is_valid, error = validate_mobile_message(data)
                 if not is_valid:
                     logger.warning("Invalid mobile message from %s: %s", username, error)
+                    continue
+                if data.get("type") == "ping":
+                    await websocket.send(json.dumps({"type": "pong", "sentAt": data.get("sentAt"), "serverTime": time.time()}, ensure_ascii=False))
                     continue
 
                 device_id = data.get("deviceId")
