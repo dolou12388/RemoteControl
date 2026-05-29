@@ -37,6 +37,9 @@ const BLOCKED_TOUCH_EVENTS = ["touchstart", "touchmove", "gesturestart", "gestur
 const FETCH_TIMEOUT_MS = 10000;
 const RECONNECT_MIN_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
+const EDGE_PAN_SIZE = 34;
+const EDGE_PAN_MAX_SPEED = 22;
+const EDGE_PAN_INTERVAL_MS = 40;
 
 let token = localStorage.getItem("csToken") || "";
 let username = localStorage.getItem("csUsername") || "";
@@ -67,6 +70,9 @@ let longPressActive = false;
 let longPressButton = "left";
 let zoomRepeatTimer = null;
 let pairingTimer = null;
+let edgePanTimer = null;
+let edgePanX = 0;
+let edgePanY = 0;
 
 const config = window.CS_CONFIG || {};
 
@@ -171,9 +177,6 @@ function showRemoteInput() {
   if (!selectedDevice) return;
   remoteInputPanel.classList.remove("hidden");
   controls.classList.add("input-open");
-  requestAnimationFrame(() => {
-    remoteInput.focus({ preventScroll: false });
-  });
 }
 
 function hideRemoteInput() {
@@ -197,6 +200,43 @@ function queueMove(dx, dy) {
   if (!moveFrame) {
     moveFrame = requestAnimationFrame(flushMove);
   }
+}
+
+function edgeVelocity(value, max) {
+  if (value <= EDGE_PAN_SIZE) {
+    return -Math.min(1, (EDGE_PAN_SIZE - value) / EDGE_PAN_SIZE) * EDGE_PAN_MAX_SPEED;
+  }
+  if (value >= max - EDGE_PAN_SIZE) {
+    return Math.min(1, (value - (max - EDGE_PAN_SIZE)) / EDGE_PAN_SIZE) * EDGE_PAN_MAX_SPEED;
+  }
+  return 0;
+}
+
+function updateEdgePan(point) {
+  if (!point || activePointers.size !== 1 || primaryPointerId == null || didTwoFingerGesture) {
+    stopEdgePan();
+    return;
+  }
+
+  edgePanX = edgeVelocity(point.x, window.innerWidth);
+  edgePanY = edgeVelocity(point.y, window.innerHeight);
+  if (Math.abs(edgePanX) < MIN_MOVE_DELTA && Math.abs(edgePanY) < MIN_MOVE_DELTA) {
+    stopEdgePan();
+    return;
+  }
+
+  if (!edgePanTimer) {
+    edgePanTimer = setInterval(() => {
+      queueMove(edgePanX, edgePanY);
+    }, EDGE_PAN_INTERVAL_MS);
+  }
+}
+
+function stopEdgePan() {
+  clearInterval(edgePanTimer);
+  edgePanTimer = null;
+  edgePanX = 0;
+  edgePanY = 0;
 }
 
 function renderDevices() {
@@ -515,8 +555,10 @@ pad.addEventListener("pointerdown", (event) => {
       sendCommand({ type: "mouseDown", button: longPressButton });
     }, LONG_PRESS_MS);
     setCursorPosition(event.clientX, event.clientY);
+    updateEdgePan({ x: event.clientX, y: event.clientY });
   } else if (activePointers.size === 2) {
     clearLongPressTimer();
+    stopEdgePan();
     lastTwoFingerCenter = midpoint(pointerList());
     scrollRemainder = 0;
     didTwoFingerGesture = false;
@@ -531,6 +573,7 @@ pad.addEventListener("pointermove", (event) => {
   activePointers.set(event.pointerId, { x: latestEvent.clientX, y: latestEvent.clientY });
 
   if (activePointers.size >= 2) {
+    stopEdgePan();
     const center = midpoint(pointerList());
     if (!lastTwoFingerCenter) {
       lastTwoFingerCenter = center;
@@ -563,6 +606,7 @@ pad.addEventListener("pointermove", (event) => {
   if (!longPressActive && movedDistance > TAP_MAX_DISTANCE) clearLongPressTimer();
   setCursorPosition(latestEvent.clientX, latestEvent.clientY);
   queueMove(totalDx * MOVE_SENSITIVITY, totalDy * MOVE_SENSITIVITY);
+  updateEdgePan({ x: latestEvent.clientX, y: latestEvent.clientY });
 });
 
 function endPointer(event) {
@@ -587,6 +631,7 @@ function endPointer(event) {
       queueTap(hadTwoPointers ? "right" : selectedButton, event.clientX, event.clientY);
     }
     primaryPointerId = null;
+    stopEdgePan();
   }
 
   if (activePointers.size === 1) {
@@ -597,6 +642,7 @@ function endPointer(event) {
   } else if (activePointers.size === 0) {
     resetTwoFingerScroll();
     didTwoFingerGesture = false;
+    stopEdgePan();
   }
 }
 
@@ -606,6 +652,7 @@ pad.addEventListener("contextmenu", (event) => event.preventDefault());
 window.addEventListener("pointerup", stopZoomRepeat);
 window.addEventListener("blur", () => {
   stopZoomRepeat();
+  stopEdgePan();
   clearLongPressTimer();
   if (longPressActive) {
     sendCommand({ type: "mouseUp", button: longPressButton });

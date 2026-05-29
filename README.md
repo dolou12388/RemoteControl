@@ -26,6 +26,8 @@
 - 手机端设备管理页支持查看最后在线时间、连接在线设备、删除离线设备
 - 手机端可生成一次性配对码，Windows 电脑端无需输入账号密码即可配对上线
 - 电脑输入框获得焦点时，手机端显示远程输入栏
+- 远程输入栏出现时不会自动唤醒手机输入法，需要输入时手动点输入框
+- 触控点滑到手机屏幕边缘时会持续向对应方向移动鼠标
 - Linux 服务器一键部署，支持 systemd 和 Nginx 反向代理
 - 内置会话过期、登录限流和锁定、消息验证、设备超时和健康检查
 - 设备信息持久化保存，服务重启后仍可查看历史离线设备
@@ -271,6 +273,8 @@ Self-hosted phone-to-PC remote mouse control. Use your phone as a touchpad, scro
 - Device management page with last-seen time, connect action, and offline-device deletion
 - One-time pairing codes let the Windows desktop client come online without typing the account password
 - Remote text input: when a text field is focused on the PC, the phone shows an input bar
+- The remote input bar does not auto-focus, so the phone keyboard opens only when the user taps it
+- Edge panning keeps the mouse moving when the touch point reaches the phone screen edge
 - One-command Linux deployment with systemd and optional Nginx reverse proxy
 - Built-in session expiry, login rate limiting and lockout, message validation, device timeout, and health check
 - Device metadata is persisted so offline device history survives server restarts
