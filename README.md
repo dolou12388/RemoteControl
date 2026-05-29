@@ -90,6 +90,42 @@ DOMAIN=your-domain.com ADMIN_USER=admin ADMIN_PASS='use-a-long-random-password' 
 http://your-domain.com
 ```
 
+## 更新已有部署
+
+如果服务器已经部署过旧版本，可以重新拉取最新代码并再次运行部署脚本。脚本会自动备份 `/opt/control-mouse`，同时保留已有 `.env`、`data/` 和虚拟环境，账号数据不会被覆盖。
+
+```bash
+cd /tmp
+rm -rf RemoteControl
+git clone https://github.com/dolou12388/RemoteControl.git
+cd RemoteControl/server
+
+DOMAIN=your-domain.com \
+HTTP_PORT=2345 \
+WS_PORT=2346 \
+ADMIN_USER=admin \
+ADMIN_PASS='use-a-long-random-password' \
+bash deploy.sh
+```
+
+如果之前修改过端口，请继续使用原来的 `HTTP_PORT` 和 `WS_PORT`。如果已经配置过 HTTPS，脚本会保留已有 Nginx 站点配置，只更新应用代码并重启服务。
+
+更新后检查：
+
+```bash
+systemctl --no-pager --full status control-mouse
+curl http://127.0.0.1:2345/health
+```
+
+如果需要回滚，找到脚本生成的备份目录，例如 `/opt/control-mouse.backup.20260529173000`，恢复后重启服务：
+
+```bash
+systemctl stop control-mouse
+rm -rf /opt/control-mouse
+cp -a /opt/control-mouse.backup.20260529173000 /opt/control-mouse
+systemctl start control-mouse
+```
+
 ## 开启 HTTPS
 
 公网部署强烈建议开启 HTTPS。
